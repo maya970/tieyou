@@ -28,13 +28,21 @@ if (!$stmt->fetch() && $_SESSION['role'] !== 'super_admin') {
 
 // Load cities with player tags
 $stmt = $pdo->prepare("
-    SELECT c.*, cp.player_tag AS player_username
+    SELECT c.id, c.game_id, c.name, c.x, c.y, c.color, c.description, c.population, c.resources, 
+           c.growth_rate, c.updated_at, c.city_display_type, c.city_display_value, c.economy, 
+           c.economy_growth, c.military, c.military_growth, c.culture, c.culture_growth, c.science, 
+           c.science_growth, c.infrastructure, c.infrastructure_growth, c.health, c.health_growth, 
+           c.education, c.education_growth, c.stability, c.stability_growth, c.value9, c.growth_rate9, 
+           c.type, cp.player_tag AS player_username
     FROM cities c
     LEFT JOIN city_players cp ON c.id = cp.city_id AND c.game_id = cp.game_id
     WHERE c.game_id = ?
 ");
 $stmt->execute([$game_id]);
 $cities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+if (!$cities) {
+    $cities = [];
+}
 
 // Load distinct player tags
 $stmt = $pdo->prepare("SELECT DISTINCT player_tag FROM city_players WHERE game_id = ?");
@@ -108,8 +116,9 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             height: 600px;
             overflow: hidden;
             background: #f0f0f0;
-            z-index: 1; /* Lower z-index to prevent overlap with UI */
-            margin-top: 1rem; /* Space above map */
+            z-index: 10;
+            margin-top: 2rem;
+            border-radius: 0.5rem;
         }
         .map-svg {
             position: absolute;
@@ -119,9 +128,14 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             height: 600px;
             z-index: 1;
         }
+        .map-controls {
+            position: relative;
+            z-index: 20;
+            margin-top: 0.5rem;
+        }
         .city-details {
             position: relative;
-            z-index: 10;
+            z-index: 30;
             transition: all 0.3s ease;
         }
         .city-details.show {
@@ -142,7 +156,7 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             background: white;
             padding: 1.5rem;
             border-radius: 0.5rem;
-            max-width: 90%;
+            max-width: 100%;
             max-height: 80vh;
             overflow-y: auto;
             position: relative;
@@ -154,6 +168,7 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .player-filter {
             max-height: 200px;
             overflow-y: auto;
+            z-index: 20;
         }
         .pagination {
             display: flex;
@@ -161,13 +176,7 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             justify-content: center;
             margin-top: 1rem;
         }
-        /* Ensure UI buttons are clickable */
-        .ui-buttons {
-            position: relative;
-            z-index: 20;
-            margin-bottom: 1rem;
-        }
-        .game-info, .player-filter {
+        .ui-buttons, .game-info {
             position: relative;
             z-index: 20;
             margin-bottom: 1rem;
@@ -198,6 +207,9 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <button @click="openHistoryModal" class="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600">查看历史</button>
             <?php if ($_SESSION['role'] === 'game_admin' && $game['creator_id'] == $_SESSION['user_id'] || $_SESSION['role'] === 'super_admin'): ?>
                 <a href="admin.php?game_id=<?php echo $game_id; ?>" class="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600">管理员面板</a>
+            <?php endif; ?>
+            <?php if ($_SESSION['role'] === 'super_admin'): ?>
+                <a href="super_admin.php" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">超级管理员面板</a>
             <?php endif; ?>
         </div>
 
@@ -236,14 +248,25 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 height="600"
                 v-draggable
             >
+                <!-- Background Image -->
+                <image
+                    v-if="backgroundImage"
+                    x="0"
+                    y="0"
+                    width="800"
+                    height="600"
+                    :href="backgroundImage"
+                    preserveAspectRatio="xMidYMid meet"
+                />
+                <!-- Cities -->
                 <g v-for="city in filteredCities" :key="city.id">
                     <circle
                         v-if="city.city_display_type === 'circle'"
                         :cx="city.x"
                         :cy="city.y"
                         r="10"
-                        :fill="city.player_username === selectedPlayer && selectedPlayer ? 'red' : 'blue'"
-                        class="cursor-pointer hover:fill-blue-700"
+                        :fill="city.color || (city.player_username === selectedPlayer && selectedPlayer ? 'red' : 'blue')"
+                        class="cursor-pointer hover:fill-opacity-80"
                         @click="showCityDetails(city)"
                         @touchstart="showCityDetails(city)"
                     />
@@ -262,7 +285,7 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         v-if="city.city_display_type === 'text' && city.city_display_value"
                         :x="city.x"
                         :y="city.y"
-                        fill="black"
+                        :fill="city.color || 'black'"
                         font-size="20"
                         text-anchor="middle"
                         class="cursor-pointer"
@@ -270,41 +293,43 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         @touchstart="showCityDetails(city)"
                     >{{ city.city_display_value }}</text>
                     <text
-                        v-if="showCityNames || city.show_name"
+                        v-if="showCityNames"
                         :x="city.x + 15"
                         :y="city.y"
-                        fill="black"
+                        :fill="city.color || 'black'"
                         font-size="12"
                     >{{ city.name }}</text>
                 </g>
             </svg>
-            <div class="mt-2 flex gap-2">
+            <div class="map-controls mt-2 flex gap-2">
                 <button @click="zoomIn" class="bg-gray-300 px-2 py-1 rounded">放大</button>
                 <button @click="zoomOut" class="bg-gray-300 px-2 py-1 rounded">缩小</button>
                 <button @click="resetMap" class="bg-gray-300 px-2 py-1 rounded">重置地图</button>
             </div>
+            
         </div>
 
-        <!-- City Details -->
-        <div v-if="selectedCity" class="city-details bg-white p-4 rounded-lg shadow mt-4">
-            <h2 class="text-lg font-semibold">{{ selectedCity.name }}</h2>
-            <p class="mt-2">{{ selectedCity.description }}</p>
-            <p v-if="selectedCity.player_username">控制者: {{ selectedCity.player_username }}</p>
-            <p>人口: {{ selectedCity.population }} (增长: {{ selectedCity.growth_rate }}%)</p>
-            <p>资源: {{ selectedCity.resources }}</p>
-            <p>经济: {{ selectedCity.economy }} (增长: {{ selectedCity.economy_growth }}%)</p>
-            <p>军事: {{ selectedCity.military }} (增长: {{ selectedCity.military_growth }}%)</p>
-            <p>文化: {{ selectedCity.culture }} (增长: {{ selectedCity.culture_growth }}%)</p>
-            <p>科技: {{ selectedCity.science }} (增长: {{ selectedCity.science_growth }}%)</p>
-            <p>基础设施: {{ selectedCity.infrastructure }} (增长: {{ selectedCity.infrastructure_growth }}%)</p>
-            <p>健康: {{ selectedCity.health }} (增长: {{ selectedCity.health_growth }}%)</p>
-            <p>教育: {{ selectedCity.education }} (增长: {{ selectedCity.education_growth }}%)</p>
-            <p>稳定性: {{ selectedCity.stability }} (增长: {{ selectedCity.stability_growth }}%)</p>
-            <p>显示类型: {{ selectedCity.city_display_type }}</p>
-            <p v-if="selectedCity.city_display_value">显示值: {{ selectedCity.city_display_value }}</p>
-            <p>名称可见: {{ selectedCity.show_name ? '是' : '否' }}</p>
-            <button @click="selectedCity = null" class="mt-4 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">关闭</button>
-        </div>
+<!-- City Details -->
+<div v-if="selectedCity" class="city-details bg-white p-4 rounded-lg shadow mt-4">
+    <h2 class="text-lg font-semibold">{{ selectedCity.name }}</h2>
+    <p class="mt-2">坐标: ({{ selectedCity.x }}, {{ selectedCity.y }})</p>
+    <p>颜色: <span :style="{ color: selectedCity.color || '#0000FF' }">{{ selectedCity.color || '#0000FF' }}</span></p>
+    <p>{{ selectedCity.description }}</p>
+    <p v-if="selectedCity.player_username">控制者: {{ selectedCity.player_username }}</p>
+    <p v-if="selectedCity.population && selectedCity.population !== 'N/A'">人口: {{ selectedCity.population }} (增长: {{ selectedCity.growth_rate || 0 }}%)</p>
+    <p v-if="selectedCity.resources && selectedCity.resources !== 'N/A'">资源: {{ selectedCity.resources }}</p>
+    <p v-if="selectedCity.economy && selectedCity.economy !== 'N/A'">经济: {{ selectedCity.economy }} (增长: {{ selectedCity.economy_growth || 0 }}%)</p>
+    <p v-if="selectedCity.military && selectedCity.military !== 'N/A'">军事: {{ selectedCity.military }} (增长: {{ selectedCity.military_growth || 0 }}%)</p>
+    <p v-if="selectedCity.culture && selectedCity.culture !== 'N/A'">文化: {{ selectedCity.culture }} (增长: {{ selectedCity.culture_growth || 0 }}%)</p>
+    <p v-if="selectedCity.science && selectedCity.science !== 'N/A'">科技: {{ selectedCity.science }} (增长: {{ selectedCity.science_growth || 0 }}%)</p>
+    <p v-if="selectedCity.infrastructure && selectedCity.infrastructure !== 'N/A'">基础设施: {{ selectedCity.infrastructure }} (增长: {{ selectedCity.infrastructure_growth || 0 }}%)</p>
+    <p v-if="selectedCity.health && selectedCity.health !== 'N/A'">健康: {{ selectedCity.health }} (增长: {{ selectedCity.health_growth || 0 }}%)</p>
+    <p v-if="selectedCity.education && selectedCity.education !== 'N/A'">教育: {{ selectedCity.education }} (增长: {{ selectedCity.education_growth || 0 }}%)</p>
+    <p v-if="selectedCity.stability && selectedCity.stability !== 'N/A'">稳定性: {{ selectedCity.stability }} (增长: {{ selectedCity.stability_growth || 0 }}%)</p>
+    <p>显示类型: {{ selectedCity.city_display_type }}</p>
+    <p v-if="selectedCity.city_display_value">显示值: {{ selectedCity.city_display_value }}</p>
+    <button @click="selectedCity = null" class="mt-4 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">关闭</button>
+</div>
 
         <!-- Submit Order -->
         <h2 class="text-lg font-semibold mt-8 mb-2">提交命令</h2>
@@ -323,17 +348,17 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <button type="submit" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">提交命令</button>
         </form>
 
-        <!-- Public Orders -->
-        <h2 class="text-lg font-semibold mb-2">当前回合公开命令</h2>
-        <div class="bg-white p-4 rounded-lg shadow mb-8">
-            <ul v-if="publicOrders.length" class="list-disc pl-5">
-                <li v-for="order in publicOrders" :key="order.id">
-                    {{ order.content }} (由 {{ order.username }} 提交)
-                    <span v-if="order.admin_reply"> | 回复: {{ order.admin_reply }}</span>
-                </li>
-            </ul>
-            <p v-else class="text-gray-500">无公开命令。</p>
-        </div>
+<!-- Public Orders -->
+<h2 class="text-lg font-semibold mb-2">当前回合公开命令</h2>
+<div class="bg-white p-4 rounded-lg shadow mb-8">
+    <ul v-if="publicOrders.length" class="list-disc pl-5">
+        <li v-for="order in publicOrders" :key="order.id">
+            {{ decodeHtml(order.content || '无内容') }} (由 {{ decodeHtml(order.username || '未知用户') }} 提交)
+            <span v-if="order.admin_reply"> | 回复: {{ decodeHtml(order.admin_reply) }}</span>
+        </li>
+    </ul>
+    <p v-else class="text-gray-500">无公开命令。</p>
+</div>
 
         <!-- Order History -->
         <h2 class="text-lg font-semibold mb-2">命令历史</h2>
@@ -370,7 +395,6 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div v-else v-for="round in historyRounds" :key="round.id" class="mb-4">
                     <h3 class="text-lg font-semibold">回合 {{ round.round_number }}</h3>
                     <p>结束时间: {{ round.end_time }}</p>
-                    <!-- Announcements -->
                     <h4 class="font-semibold mt-2">公告</h4>
                     <ul v-if="round.announcements && round.announcements.length" class="list-disc pl-5">
                         <li v-for="announcement in round.announcements" :key="announcement.id">
@@ -378,7 +402,6 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         </li>
                     </ul>
                     <p v-else class="pl-5">此回合无公告。</p>
-                    <!-- Orders -->
                     <h4 class="font-semibold mt-2">命令</h4>
                     <ul v-if="round.orders && round.orders.length" class="list-disc pl-5">
                         <li v-for="order in round.orders" :key="order.id">
@@ -389,7 +412,6 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <p v-else class="pl-5">此回合无命令。</p>
                     <p v-if="round.error" class="text-red-500 pl-5">{{ round.error }}</p>
                 </div>
-                <!-- Pagination -->
                 <div class="pagination">
                     <button
                         v-if="currentPage > 1"
@@ -413,14 +435,14 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             const app = Vue.createApp({
                 data() {
                     return {
-                        cities: <?php echo json_encode($cities, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS); ?>,
-                        filteredCities: <?php echo json_encode($cities, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS); ?>,
+                        cities: <?php echo json_encode($cities, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS) ?: '[]'; ?>,
+                        filteredCities: <?php echo json_encode($cities, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS) ?: '[]'; ?>,
                         selectedCity: null,
                         currentRound: <?php echo $current_round['round_number'] ?? 0; ?>,
                         publicOrders: [],
                         showRules: false,
                         showHistory: false,
-                        historyRounds: <?php echo json_encode($history_rounds_safe, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS); ?>,
+                        historyRounds: <?php echo json_encode($history_rounds_safe, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS) ?: '[]'; ?>,
                         currentPage: <?php echo $page; ?>,
                         totalPages: <?php echo $total_pages; ?>,
                         zoom: 1,
@@ -429,10 +451,11 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         isDragging: false,
                         startX: 0,
                         startY: 0,
-                        showCityNames: <?php echo $game['show_city_names'] ?? 1; ?>,
-                        players: <?php echo json_encode($players, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS); ?>,
+                        showCityNames: false, // Client-side toggle, default to false
+                        players: <?php echo json_encode($players, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS) ?: '[]'; ?>,
                         selectedPlayer: '',
-                        orders: <?php echo json_encode($orders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS); ?>
+                        orders: <?php echo json_encode($orders, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS) ?: '[]'; ?>,
+                        backgroundImage: '<?php echo htmlspecialchars($game['background_image'] ?? ''); ?>'
                     };
                 },
                 computed: {
@@ -440,16 +463,16 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         if (!this.selectedPlayer) return {};
                         const ownedCities = this.cities.filter(city => city.player_username === this.selectedPlayer);
                         return {
-                            population: ownedCities.reduce((sum, city) => sum + (city.population || 0), 0),
-                            resources: ownedCities.reduce((sum, city) => sum + (city.resources || 0), 0),
-                            economy: ownedCities.reduce((sum, city) => sum + (city.economy || 0), 0),
-                            military: ownedCities.reduce((sum, city) => sum + (city.military || 0), 0),
-                            culture: ownedCities.reduce((sum, city) => sum + (city.culture || 0), 0),
-                            science: ownedCities.reduce((sum, city) => sum + (city.science || 0), 0),
-                            infrastructure: ownedCities.reduce((sum, city) => sum + (city.infrastructure || 0), 0),
-                            health: ownedCities.reduce((sum, city) => sum + (city.health || 0), 0),
-                            education: ownedCities.reduce((sum, city) => sum + (city.education || 0), 0),
-                            stability: ownedCities.reduce((sum, city) => sum + (city.stability || 0), 0),
+                            population: ownedCities.reduce((sum, city) => sum + (parseFloat(city.population) || 0), 0).toFixed(2),
+                            resources: ownedCities.reduce((sum, city) => sum + (parseFloat(city.resources) || 0), 0).toFixed(2),
+                            economy: ownedCities.reduce((sum, city) => sum + (parseFloat(city.economy) || 0), 0).toFixed(2),
+                            military: ownedCities.reduce((sum, city) => sum + (parseFloat(city.military) || 0), 0).toFixed(2),
+                            culture: ownedCities.reduce((sum, city) => sum + (parseFloat(city.culture) || 0), 0).toFixed(2),
+                            science: ownedCities.reduce((sum, city) => sum + (parseFloat(city.science) || 0), 0).toFixed(2),
+                            infrastructure: ownedCities.reduce((sum, city) => sum + (parseFloat(city.infrastructure) || 0), 0).toFixed(2),
+                            health: ownedCities.reduce((sum, city) => sum + (parseFloat(city.health) || 0), 0).toFixed(2),
+                            education: ownedCities.reduce((sum, city) => sum + (parseFloat(city.education) || 0), 0).toFixed(2),
+                            stability: ownedCities.reduce((sum, city) => sum + (parseFloat(city.stability) || 0), 0).toFixed(2),
                             cityCount: ownedCities.length
                         };
                     }
@@ -458,23 +481,37 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     showCityDetails(city) {
                         this.selectedCity = city;
                     },
-                    loadPublicOrders() {
-                        fetch('view_orders.php?game_id=<?php echo $game_id; ?>&type=public')
-                            .then(response => {
-                                if (!response.ok) throw new Error('无法获取公开命令: ' + response.statusText);
-                                return response.text();
-                            })
-                            .then(data => {
-                                this.publicOrders = data.split('\n').filter(line => line).map(line => {
-                                    let [id, content, username, admin_reply] = line.split('|');
-                                    return { id, content, username, admin_reply };
-                                });
-                            })
-                            .catch(error => {
-                                console.error('获取公开命令错误:', error);
-                                this.publicOrders = [];
-                            });
-                    },
+                  loadPublicOrders() {
+    fetch('view_orders.php?game_id=<?php echo $game_id; ?>&type=public', { cache: 'no-store' })
+        .then(response => {
+            if (!response.ok) throw new Error('无法获取公开命令: ' + response.statusText);
+            return response.text();
+        })
+        .then(data => {
+            console.log('Raw data from view_orders.php:', data); // 调试原始数据
+            this.publicOrders = data.split('\n').filter(line => line.trim()).map(line => {
+                // 按 | 分割，确保至少有4个字段
+                const parts = line.split('|');
+                const [id = '未知ID', content = '无内容', username = '未知用户', admin_reply = ''] = parts.length >= 4 ? parts : ['未知ID', '无内容', '未知用户', ''];
+                return {
+                    id,
+                    content: content || '无内容',
+                    username: username || '未知用户',
+                    admin_reply: admin_reply || ''
+                };
+            });
+            console.log('Parsed publicOrders:', this.publicOrders); // 调试解析后数据
+        })
+        .catch(error => {
+            console.error('获取公开命令错误:', error);
+            this.publicOrders = [];
+        });
+},
+decodeHtml(html) {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = html;
+    return textarea.value;
+},
                     loadRoundOrders(round) {
                         fetch('view_round_orders.php?game_id=<?php echo $game_id; ?>&round=' + round.round_number)
                             .then(response => {
