@@ -52,6 +52,7 @@ try {
 <body class="bg-gray-100 min-h-screen p-4">
  <div class="container mx-auto">
  <h1 class="text-2xl font-bold mb-4">Game Lobby</h1>
+ <h5 class="text-2xl font-bold mb-4">+qq group 325358084 to get point to play</h5>
  <?php if (isset($error)): ?>
  <p class="text-red-500 mb-4"><?php echo htmlspecialchars($error); ?></p>
  <?php endif; ?>
