@@ -22,6 +22,70 @@ if (!$game || ($game['creator_id'] != $_SESSION['user_id'] && $_SESSION['role'] 
     exit;
 }
 
+// Handle background image upload
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['background_image'])) {
+    try {
+        $upload_dir = __DIR__ . '/uploads/map_backgrounds/';
+        if (!is_dir($upload_dir)) {
+            mkdir($upload_dir, 0775, true);
+        }
+        $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
+        $max_size = 5 * 1024 * 1024; // 5MB
+
+        $file = $_FILES['background_image'];
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('上传错误: ' . $file['error']);
+        }
+
+        if (!in_array($file['type'], $allowed_types)) {
+            throw new Exception('仅支持 JPEG、PNG 或 GIF 格式。');
+        }
+
+        if ($file['size'] > $max_size) {
+            throw new Exception('文件大小不能超过 5MB。');
+        }
+
+        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $filename = 'game_' . $game_id . '_' . time() . '.' . $ext;
+        $destination = $upload_dir . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            throw new Exception('无法保存文件。');
+        }
+
+        // Delete old image if exists
+        if (!empty($game['background_image']) && file_exists(__DIR__ . $game['background_image'])) {
+            unlink(__DIR__ . $game['background_image']);
+        }
+
+        // Update database
+        $stmt = $pdo->prepare("UPDATE games SET background_image = ? WHERE id = ?");
+        $stmt->execute(['/uploads/map_backgrounds/' . $filename, $game_id]);
+
+        header('Location: admin.php?game_id=' . $game_id . '&success=背景图片已更新。');
+        exit;
+    } catch (Exception $e) {
+        header('Location: admin.php?game_id=' . $game_id . '&error=' . urlencode($e->getMessage()));
+        exit;
+    }
+}
+
+// Handle background image removal
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_background'])) {
+    try {
+        if (!empty($game['background_image']) && file_exists(__DIR__ . $game['background_image'])) {
+            unlink(__DIR__ . $game['background_image']);
+        }
+        $stmt = $pdo->prepare("UPDATE games SET background_image = NULL WHERE id = ?");
+        $stmt->execute([$game_id]);
+        header('Location: admin.php?game_id=' . $game_id . '&success=背景图片已移除。');
+        exit;
+    } catch (Exception $e) {
+        header('Location: admin.php?game_id=' . $game_id . '&error=' . urlencode($e->getMessage()));
+        exit;
+    }
+}
+
 // Handle city/tile creation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_city'])) {
     $name = trim($_POST['name'] ?? '');
@@ -163,6 +227,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['respond_order'])) {
         // Deduct points
         $stmt = $pdo->prepare("UPDATE users SET points = points - ? WHERE id = ?");
         $stmt->execute([$points_cost, $order['user_id']]);
+     // 查询作者id，并加分
+        $stmt = $pdo->prepare("SELECT creator_id FROM games WHERE id = ?");
+        $stmt->execute([$game_id]);
+        $stmt = $pdo->prepare("UPDATE users SET points = points + ? WHERE id = ?");
+        $stmt->execute([$points_cost,$game['creator_id']]);
 
         if ($existing_pending) {
             // Update existing pending_orders record if points_cost has changed
@@ -281,21 +350,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_settings'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['end_round'])) {
     try {
         $pdo->beginTransaction();
+
+        // Deactivate current round
         $stmt = $pdo->prepare("UPDATE rounds SET is_active = 0 WHERE game_id = ? AND is_active = 1");
         $stmt->execute([$game_id]);
+
+        // Update city numerical values based on growth rates
+        $stmt = $pdo->prepare("
+            UPDATE cities
+            SET
+                population = COALESCE(population, 0) + (COALESCE(population, 0) * COALESCE(growth_rate, 0) / 100),
+                economy = COALESCE(economy, 0) + (COALESCE(economy, 0) * COALESCE(economy_growth, 0) / 100),
+                military = COALESCE(military, 0) + (COALESCE(military, 0) * COALESCE(military_growth, 0) / 100),
+                culture = COALESCE(culture, 0) + (COALESCE(culture, 0) * COALESCE(culture_growth, 0) / 100),
+                science = COALESCE(science, 0) + (COALESCE(science, 0) * COALESCE(science_growth, 0) / 100),
+                infrastructure = COALESCE(infrastructure, 0) + (COALESCE(infrastructure, 0) * COALESCE(infrastructure_growth, 0) / 100),
+                health = COALESCE(health, 0) + (COALESCE(health, 0) * COALESCE(health_growth, 0) / 100),
+                education = COALESCE(education, 0) + (COALESCE(education, 0) * COALESCE(education_growth, 0) / 100),
+                stability = COALESCE(stability, 0) + (COALESCE(stability, 0) * COALESCE(stability_growth, 0) / 100),
+                updated_at = NOW()
+            WHERE game_id = ? AND type = 'city'
+        ");
+        $stmt->execute([$game_id]);
+
+        // Get the next round number
         $stmt = $pdo->prepare("SELECT MAX(round_number) FROM rounds WHERE game_id = ?");
         $stmt->execute([$game_id]);
         $new_round_number = ($stmt->fetchColumn() ?: 0) + 1;
+
+        // Start new round
         $end_time = date('Y-m-d H:i:s', strtotime('+1 day'));
-        $stmt = $pdo->prepare("INSERT INTO rounds (game_id, round_number, is_active, end_time, status) VALUES (?, ?, 1, ?, 'active')");
+        $stmt = $pdo->prepare("
+            INSERT INTO rounds (game_id, round_number, is_active, end_time, status)
+            VALUES (?, ?, 1, ?, 'active')
+        ");
         $stmt->execute([$game_id, $new_round_number, $end_time]);
+
         $pdo->commit();
-        header('Location: admin.php?game_id=' . $game_id . '&success=新回合已开始。');
+        header('Location: admin.php?game_id=' . $game_id . '&success=新回合已开始，城市数值已更新。');
         exit;
     } catch (Exception $e) {
         $pdo->rollBack();
-        error_log("回合管理失败: " . $e->getMessage());
-        header('Location: admin.php?game_id=' . $game_id . '&error=回合管理失败: ' . htmlspecialchars($e->getMessage()));
+        error_log("回合管理或城市数值更新失败: " . $e->getMessage());
+        header('Location: admin.php?game_id=' . $game_id . '&error=回合管理或城市数值更新失败: ' . htmlspecialchars($e->getMessage()));
         exit;
     }
 }
@@ -342,12 +439,29 @@ $city_player_map = array_column($city_players, 'player_tag', 'city_id');
             <input type="text" name="name" value="<?php echo htmlspecialchars($game['name']); ?>" required class="w-full p-2 mb-2 border rounded" placeholder="游戏名称">
             <textarea name="rules" required class="w-full p-2 mb-2 border rounded h-24" placeholder="游戏规则"><?php echo htmlspecialchars($game['rules']); ?></textarea>
             <label class="block mb-2">
-                <input type="checkbox" name="show_city_names" <?php echo $game['show_city_names'] ? 'checked' : ''; ?>>
-                在地图上显示城市名称
+                
+                玩家每次指令回复收取多少积分？
             </label>
             <input type="number" name="order_points_cost" value="<?php echo htmlspecialchars($game['order_points_cost']); ?>" class="w-full p-2 mb-2 border rounded" placeholder="指令回复积分消耗">
             <button type="submit" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">更新设置</button>
         </form>
+
+        <!-- Background Image Management -->
+        <h2 class="text-lg font-semibold mb-2">设置地图背景图片</h2>
+        <div class="mb-8 bg-white p-4 rounded-lg shadow">
+            <?php if (!empty($game['background_image'])): ?>
+                <p>当前背景图片:</p>
+                <img src="<?php echo htmlspecialchars($game['background_image']); ?>" alt="Map Background" class="max-w-xs mb-4">
+                <form method="POST" class="mb-4">
+                    <button type="submit" name="remove_background" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">移除背景图片</button>
+                </form>
+            <?php endif; ?>
+            <form method="POST" enctype="multipart/form-data">
+                <label class="block text-sm font-medium mb-1">上传新背景图片 (JPEG, PNG, GIF, 最大 5MB, 推荐 800x600)</label>
+                <input type="file" name="background_image" accept="image/jpeg,image/png,image/gif" required class="w-full p-2 mb-2 border rounded">
+                <button type="submit" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">上传</button>
+            </form>
+        </div>
 
         <!-- Add City/Tile -->
         <h2 class="text-lg font-semibold mb-2">添加城市/地块</h2>
@@ -358,9 +472,9 @@ $city_player_map = array_column($city_players, 'player_tag', 'city_id');
             <input type="number" name="y" placeholder="Y 坐标" required class="w-full p-2 mb-2 border rounded">
             <select name="type" class="w-full p-2 mb-2 border rounded">
                 <option value="city">城市</option>
-                <option value="mountain">山峰</option>
-                <option value="forest">森林</option>
-                <option value="ocean">海洋</option>
+                <option value="mountain">军团</option>
+                <option value="forest">特殊</option>
+                <option value="ocean">障碍</option>
             </select>
             <textarea name="description" placeholder="描述" class="w-full p-2 mb-2 border rounded h-16"></textarea>
             <select name="city_display_type" class="w-full p-2 mb-2 border rounded">
@@ -408,9 +522,9 @@ $city_player_map = array_column($city_players, 'player_tag', 'city_id');
             <select name="search_type" class="w-full p-2 mb-2 border rounded">
                 <option value="">所有类型</option>
                 <option value="city">城市</option>
-                <option value="mountain">山峰</option>
-                <option value="forest">森林</option>
-                <option value="ocean">海洋</option>
+                <option value="mountain">军团</option>
+                <option value="forest">特殊</option>
+                <option value="ocean">障碍</option>
             </select>
             <input type="text" name="search_player" placeholder="玩家标签" class="w-full p-2 mb-2 border rounded">
             <button type="submit" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">搜索</button>
@@ -450,7 +564,6 @@ $city_player_map = array_column($city_players, 'player_tag', 'city_id');
                             <input type="hidden" name="respond_order" value="1">
                             <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
                             <textarea name="response" required class="w-full p-2 mb-2 border rounded h-16" placeholder="回复内容"></textarea>
-                            <input type="number" name="points_cost" value="<?php echo htmlspecialchars($game['order_points_cost']); ?>" class="w-full p-2 mb-2 border rounded" placeholder="积分消耗">
                             <button type="submit" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">提交回复</button>
                         </form>
                     </div>
