@@ -30,11 +30,16 @@ $stmt->execute($params);
 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($orders as $order) {
+    // 清理特殊字符（换行符、分隔符等）
+    $content = str_replace(["\r\n", "\n", "\r", "|"], [" ", " ", " ", " "], $order['content'] ?? '无内容');
+    $username = str_replace(["\r\n", "\n", "\r", "|"], [" ", " ", " ", " "], $order['username'] ?? '未知');
+    $admin_reply = str_replace(["\r\n", "\n", "\r", "|"], [" ", " ", " ", " "], $order['admin_reply'] ?? '');
+    
     echo implode('|', [
         $order['id'],
-        htmlspecialchars($order['content']),
-        htmlspecialchars($order['username'] ?: '未知'),
-        htmlspecialchars($order['admin_reply'] ?? '')
+        htmlspecialchars($content, ENT_QUOTES, 'UTF-8'),
+        htmlspecialchars($username, ENT_QUOTES, 'UTF-8'),
+        htmlspecialchars($admin_reply, ENT_QUOTES, 'UTF-8')
     ]) . "\n";
 }
 ?>
