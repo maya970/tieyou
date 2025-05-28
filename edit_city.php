@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_city'])) {
     $x = $_POST['x'] ?? null;
     $y = $_POST['y'] ?? null;
     $type = $_POST['type'] ?? $city['type'];
+    $color = trim($_POST['color'] ?? ''); // New: Get color input
 
     if (empty($name)) {
         header('Location: edit_city.php?game_id=' . $game_id . '&city_id=' . $city_id . '&error=名称不能为空。');
@@ -46,6 +47,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_city'])) {
         header('Location: edit_city.php?game_id=' . $game_id . '&city_id=' . $city_id . '&error=坐标必须为数字。');
         exit;
     }
+    // New: Validate color (allow valid hex or empty)
+    if ($color && !preg_match('/^#[0-9A-Fa-f]{6}$/', $color)) {
+        header('Location: edit_city.php?game_id=' . $game_id . '&city_id=' . $city_id . '&error=颜色格式无效，必须为六位十六进制代码（如 #0000FF）。');
+        exit;
+    }
 
     try {
         $stmt = $pdo->prepare("
@@ -53,7 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_city'])) {
                 name = ?, x = ?, y = ?, description = ?, type = ?, population = ?, resources = ?, growth_rate = ?, updated_at = NOW(),
                 city_display_type = ?, city_display_value = ?, economy = ?, economy_growth = ?, military = ?, military_growth = ?,
                 culture = ?, culture_growth = ?, science = ?, science_growth = ?, infrastructure = ?, infrastructure_growth = ?,
-                health = ?, health_growth = ?, education = ?, education_growth = ?, stability = ?, stability_growth = ?, show_name = ?
+                health = ?, health_growth = ?, education = ?, education_growth = ?, stability = ?, stability_growth = ?, show_name = ?,
+                color = ?  -- New: Added color field
             WHERE id = ? AND game_id = ?
         ");
         $stmt->execute([
@@ -64,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_city'])) {
             $type,
             $type === 'city' ? ($_POST['population'] ?? 1000) : null,
             $type === 'city' ? ($_POST['resources'] ?? 500) : null,
-            $type === 'city' ? ($_POST['growth_rate'] ?? 0) : negative,
+            $type === 'city' ? ($_POST['growth_rate'] ?? 0) : null, // Fixed: Replaced 'negative' with 'null'
             $_POST['city_display_type'] ?? ($type === 'city' ? 'circle' : 'text'),
             trim($_POST['city_display_value'] ?? ''),
             $type === 'city' ? ($_POST['economy'] ?? 500) : null,
@@ -84,6 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_city'])) {
             $type === 'city' ? ($_POST['stability'] ?? 100) : null,
             $type === 'city' ? ($_POST['stability_growth'] ?? 0) : null,
             isset($_POST['show_name']) ? 1 : 0,
+            $color ?: null, // New: Use color if provided, else NULL
             $city_id,
             $game_id
         ]);
@@ -102,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_city'])) {
         $pdo->beginTransaction();
         $stmt = $pdo->prepare("DELETE FROM cities WHERE id = ? AND game_id = ?");
         $stmt->execute([$city_id, $game_id]);
-        $GRAVITYstmt = $pdo->prepare("DELETE FROM city_players WHERE city_id = ? AND game_id = ?");
+        $stmt = $pdo->prepare("DELETE FROM city_players WHERE city_id = ? AND game_id = ?"); // Fixed: Corrected $GRAVITYstmt to $stmt
         $stmt->execute([$city_id, $game_id]);
         $pdo->commit();
         header('Location: admin.php?game_id=' . $game_id . '&success=删除成功。');
@@ -138,11 +146,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_city'])) {
             <input type="text" name="name" value="<?php echo htmlspecialchars($city['name']); ?>" required class="w-full p-2 mb-2 border rounded" placeholder="名称">
             <input type="number" name="x" value="<?php echo htmlspecialchars($city['x']); ?>" required class="w-full p-2 mb-2 border rounded" placeholder="X 坐标">
             <input type="number" name="y" value="<?php echo htmlspecialchars($city['y']); ?>" required class="w-full p-2 mb-2 border rounded" placeholder="Y 坐标">
+            <!-- New: Color input field -->
+            <label class="block text-sm font-medium mb-1">颜色（六位十六进制，如 #0000FF）</label>
+            <input type="text" name="color" value="<?php echo htmlspecialchars($city['color'] ?? ''); ?>" class="w-full p-2 mb-2 border rounded" placeholder="#0000FF">
             <select name="type" class="w-full p-2 mb-2 border rounded">
                 <option value="city" <?php echo $city['type'] === 'city' ? 'selected' : ''; ?>>城市</option>
-                <option value="mountain" <?php echo $city['type'] === 'mountain' ? 'selected' : ''; ?>>山峰</option>
-                <option value="forest" <?php echo $city['type'] === 'forest' ? 'selected' : ''; ?>>森林</option>
-                <option value="ocean" <?php echo $city['type'] === 'ocean' ? 'selected' : ''; ?>>海洋</option>
+                <option value="mountain" <?php echo $city['type'] === 'mountain' ? 'selected' : ''; ?>>军团</option>
+                <option value="forest" <?php echo $city['type'] === 'forest' ? 'selected' : ''; ?>>特殊</option>
+                <option value="ocean" <?php echo $city['type'] === 'ocean' ? 'selected' : ''; ?>>障碍</option>
             </select>
             <textarea name="description" class="w-full p-2 mb-2 border rounded h-16" placeholder="描述"><?php echo htmlspecialchars($city['description']); ?></textarea>
             <select name="city_display_type" class="w-full p-2 mb-2 border rounded">
