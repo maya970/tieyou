@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D 迷宫游戏（带跳跃和手机优化）</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #controls { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 20px; 
+            z-index: 10; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+        }
+        #forwardBtn, #jumpBtn { 
+            padding: 10px 20px; 
+            font-size: 16px; 
+            background: #4CAF50; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            touch-action: manipulation; 
+            width: 100px; 
+        }
+        #forwardBtn:active, #jumpBtn:active { background: #45a049; }
+        @media (max-width: 600px) {
+            #controls { left: 10px; bottom: 10px; }
+            #forwardBtn, #jumpBtn { width: 80px; font-size: 14px; padding: 8px 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="forwardBtn">向前</button>
+        <button id="jumpBtn">跳跃</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // 初始化场景、相机和渲染器
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 创建迷宫
+        const maze = [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 0, 1],
+            [1, 0, 1, 0, 1, 0, 1, 1],
+            [1, 0, 1, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 1, 0, 1],
+            [1, 1, 1, 1, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1]
+        ];
+        const cellSize = 2;
+        const wallHeight = 2;
+        const mazeWidth = maze[0].length * cellSize;
+        const mazeHeight = maze.length * cellSize;
+
+        // 添加地面
+        const floorGeometry = new THREE.PlaneGeometry(mazeWidth, mazeHeight);
+        const floorMaterial = new THREE.MeshBasicMaterial({ color: 0x888888 });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // 添加迷宫墙壁
+        const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+        for (let y = 0; y < maze.length; y++) {
+            for (let x = 0; x < maze[y].length; x++) {
+                if (maze[y][x] === 1) {
+                    const wallGeometry = new THREE.BoxGeometry(cellSize, wallHeight, cellSize);
+                    const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+                    wall.position.set(x * cellSize, wallHeight / 2, y * cellSize);
+                    scene.add(wall);
+                }
+            }
+        }
+
+        // 设置玩家初始位置和高度
+        const playerHeight = 1.5; // 人物高度
+        const player = { x: 1.5 * cellSize, y: playerHeight, z: 1.5 * cellSize };
+        camera.position.set(player.x, player.y, player.z);
+        camera.rotation.order = 'YXZ';
+
+        // 移动和跳跃控制
+        let moveForward = false;
+        let isJumping = false;
+        let jumpVelocity = 0;
+        const jumpStrength = 0.2;
+        const gravity = -0.01;
+        const groundHeight = playerHeight;
+
+        const forwardBtn = document.getElementById('forwardBtn');
+        const jumpBtn = document.getElementById('jumpBtn');
+        forwardBtn.addEventListener('mousedown', () => moveForward = true);
+        forwardBtn.addEventListener('mouseup', () => moveForward = false);
+        forwardBtn.addEventListener('touchstart', (e) => { e.preventDefault(); moveForward = true; });
+        forwardBtn.addEventListener('touchend', () => moveForward = false);
+        jumpBtn.addEventListener('mousedown', triggerJump);
+        jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); triggerJump(); });
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'KeyW') moveForward = true;
+            if (event.code === 'Space' && !isJumping) triggerJump();
+        });
+        document.addEventListener('keyup', (event) => {
+            if (event.code === 'KeyW') moveForward = false;
+        });
+
+        function triggerJump() {
+            if (!isJumping) {
+                isJumping = true;
+                jumpVelocity = jumpStrength;
+            }
+        }
+
+        // 视角控制（鼠标和触摸）
+        let yaw = 0, pitch = 0;
+        let prevTouchX = null, prevTouchY = null;
+        document.addEventListener('mousedown', () => document.addEventListener('mousemove', onMouseMove));
+        document.addEventListener('mouseup', () => document.removeEventListener('mousemove', onMouseMove));
+        document.addEventListener('touchstart', (e) => {
+            if (e.target !== forwardBtn && e.target !== jumpBtn) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                prevTouchX = touch.clientX;
+                prevTouchY = touch.clientY;
+            }
+        });
+        document.addEventListener('touchmove', (e) => {
+            if (e.target !== forwardBtn && e.target !== jumpBtn) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                if (prevTouchX !== null && prevTouchY !== null) {
+                    yaw -= (touch.clientX - prevTouchX) * 0.002;
+                    pitch -= (touch.clientY - prevTouchY) * 0.002;
+                    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+                    camera.rotation.set(pitch, yaw, 0);
+                }
+                prevTouchX = touch.clientX;
+                prevTouchY = touch.clientY;
+            }
+        });
+        document.addEventListener('touchend', () => { prevTouchX = null; prevTouchY = null; });
+
+        function onMouseMove(event) {
+            yaw -= event.movementX * 0.002;
+            pitch -= event.movementY * 0.002;
+            pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+            camera.rotation.set(pitch, yaw, 0);
+        }
+
+        // 碰撞检测和边界检查
+        function checkCollisionOrBoundary(x, z) {
+            if (x < 0 || x > mazeWidth || z < 0 || z > mazeHeight) return true;
+            const mazeX = Math.floor(x / cellSize);
+            const mazeZ = Math.floor(z / cellSize);
+            if (mazeZ < 0 || mazeZ >= maze.length || mazeX < 0 || mazeX >= maze[0].length) return true;
+            return maze[mazeZ][mazeX] === 1;
+        }
+
+        // 动画循环
+        const speed = 0.1;
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 处理跳跃和重力
+            if (isJumping) {
+                player.y += jumpVelocity;
+                jumpVelocity += gravity;
+                if (player.y <= groundHeight) {
+                    player.y = groundHeight;
+                    isJumping = false;
+                    jumpVelocity = 0;
+                }
+            }
+
+            // 处理向前移动
+            if (moveForward) {
+                const direction = new THREE.Vector3();
+                camera.getWorldDirection(direction);
+                const newX = player.x + direction.x * speed;
+                const newZ = player.z + direction.z * speed;
+
+                if (!checkCollisionOrBoundary(newX, player.z)) player.x = newX;
+                if (!checkCollisionOrBoundary(player.x, newZ)) player.z = newZ;
+            }
+
+            // 更新相机位置
+            camera.position.set(player.x, player.y, player.z);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // 窗口大小调整
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

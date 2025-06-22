@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>rpg v0.0.4</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      border: 2px solid #0f0;
+      width: 100vw;
+      height: calc(100vh - 100px);
+      max-width: 800px;
+      max-height: 800px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      display: grid;
+      grid-template-areas: 
+        ". up ."
+        "left . right"
+        ". down .";
+      gap: 15px;
+      width: 90%;
+      max-width: 300px;
+      justify-items: center;
+      align-items: center;
+    }
+    .control-btn {
+      width: 60px;
+      height: 60px;
+      background: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #up { grid-area: up; }
+    #left { grid-area: left; }
+    #right { grid-area: right; }
+    #down { grid-area: down; }
+    @media (max-width: 400px) {
+      .control-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+      }
+      #controls {
+        gap: 10px;
+        bottom: 5px;
+      }
+      canvas {
+        height: calc(100vh - 80px);
+      }
+    }
+    @media (min-width: 601px) {
+      .control-btn {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div class="control-btn" id="up">up</div>
+    <div class="control-btn" id="left">left</div>
+    <div class="control-btn" id="right">right</div>
+    <div class="control-btn" id="down">down</div>
+  </div>
+  <script>
+    let maze;
+    let player;
+    let cellSize;
+    let cols, rows;
+    let regions;
+    let radarAngle = 0;
+    let radarRange = 100;
+    
+    function setup() {
+      let size = min(windowWidth, windowHeight - 100, 800);
+      createCanvas(size, size);
+      cellSize = floor(size / 12); // Adjusted for mobile
+      cols = floor(width / cellSize);
+      rows = floor(height / cellSize);
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100 };
+      
+      // Add touch event listeners
+      document.getElementById('up').addEventListener('touchstart', () => movePlayer(UP_ARROW));
+      document.getElementById('left').addEventListener('touchstart', () => movePlayer(LEFT_ARROW));
+      document.getElementById('right').addEventListener('touchstart', () => movePlayer(RIGHT_ARROW));
+      document.getElementById('down').addEventListener('touchstart', () => movePlayer(DOWN_ARROW));
+    }
+    
+    function windowResized() {
+      let size = min(windowWidth, windowHeight - 100, 800);
+      resizeCanvas(size, size);
+      cellSize = floor(size / 12);
+      cols = floor(width / cellSize);
+      rows = floor(height / cellSize);
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100 };
+    }
+    
+    function generateMaze(cols, rows) {
+      let grid = [];
+      for (let y = 0; y < rows; y++) {
+        grid[y] = [];
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = { walls: [true, true, true, true], visited: false };
+        }
+      }
+      function carve(x, y) {
+        grid[y][x].visited = true;
+        let directions = shuffle([[0, -1], [1, 0], [0, 1], [-1, 0]]);
+        for (let [dx, dy] of directions) {
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !grid[ny][nx].visited) {
+            if (dx === 1) {
+              grid[y][x].walls[1] = false;
+              grid[ny][nx].walls[3] = false;
+            } else if (dx === -1) {
+              grid[y][x].walls[3] = false;
+              grid[ny][nx].walls[1] = false;
+            } else if (dy === 1) {
+              grid[y][x].walls[2] = false;
+              grid[ny][nx].walls[0] = false;
+            } else if (dy === -1) {
+              grid[y][x].walls[0] = false;
+              grid[ny][nx].walls[2] = false;
+            }
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(0, 0);
+      grid[rows - 2][cols - 2].walls = [false, false, false, false];
+      return grid;
+    }
+    
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+    
+    function generateRegions() {
+      let regions = [];
+      const types = [
+        { type: 'Normal', wallColor: [0, 255, 0], bgColor: [0, 50, 0, 50] },
+        { type: 'Danger', wallColor: [255, 0, 0], bgColor: [50, 0, 0, 50] },
+        { type: 'Treasure', wallColor: [255, 255, 0], bgColor: [50, 50, 0, 50] },
+        { type: 'Safe', wallColor: [0, 0, 255], bgColor: [0, 0, 50, 50] }
+      ];
+      // Initialize with random types
+      for (let y = 0; y < rows; y++) {
+        regions[y] = [];
+        for (let x = 0; x < cols; x++) {
+          regions[y][x] = types[floor(random(4))];
+        }
+      }
+      // Enforce max 3 consecutive same-type cells
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x < cols - 3) {
+            while (
+              regions[y][x].type === regions[y][x + 1].type &&
+              regions[y][x].type === regions[y][x + 2].type &&
+              regions[y][x].type === regions[y][x + 3].type
+            ) {
+              regions[y][x + 3] = types.filter(t => t.type !== regions[y][x].type)[floor(random(3))];
+            }
+          }
+          if (y < rows - 3) {
+            while (
+              regions[y][x].type === regions[y + 1][x].type &&
+              regions[y][x].type === regions[y + 2][x].type &&
+              regions[y][x].type === regions[y + 3][x].type
+            ) {
+              regions[y + 3][x] = types.filter(t => t.type !== regions[y][x].type)[floor(random(3))];
+            }
+          }
+        }
+      }
+      // Ensure start and end
+      regions[1][1] = types[0]; // Normal
+      regions[rows - 2][cols - 2] = types[3]; // Safe
+      return regions;
+    }
+    
+    function triggerEvent(x, y) {
+      let regionType = regions[y][x].type;
+      let rand = random(100);
+      let eventProbs = {
+        'Normal': { treasure: 20, trap: 10, nothing: 70 },
+        'Danger': { treasure: 10, trap: 40, nothing: 50 },
+        'Treasure': { treasure: 50, trap: 10, nothing: 40 },
+        'Safe': { treasure: 30, trap: 0, nothing: 70 }
+      };
+      let probs = eventProbs[regionType];
+      if (rand < probs.treasure) {
+        player.score += 10;
+        player.hp = min(player.hp + 10, 100);
+        alert(`Found Treasure in ${regionType} region! +10 Score, +10 HP. Score: ${player.score}, HP: ${player.hp}`);
+      } else if (rand < probs.treasure + probs.trap) {
+        player.hp -= 40;
+        alert(`Hit a Trap in ${regionType} region! -40 HP. Score: ${player.score}, HP: ${player.hp}`);
+        if (player.hp <= 0) {
+          alert(`Game Over! HP reached 0. Final Score: ${player.score}`);
+          player.x = 1;
+          player.y = 1;
+          player.score = 0;
+          player.hp = 100;
+          maze = generateMaze(cols, rows);
+          regions = generateRegions();
+        }
+      } else {
+        alert(`Nothing happened in ${regionType} region. Score: ${player.score}, HP: ${player.hp}`);
+      }
+    }
+    
+    function draw() {
+      background(0);
+      drawRegions();
+      drawMaze();
+      drawPlayer();
+      drawGoal();
+      drawRadar();
+      drawHUD();
+      radarAngle += 0.05;
+    }
+    
+    function drawRegions() {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let cellX = x * cellSize;
+          let cellY = y * cellSize;
+          let d = dist(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, cellX + cellSize / 2, cellY + cellSize / 2);
+          if (d > radarRange) continue;
+          fill(regions[y][x].bgColor);
+          noStroke();
+          rect(cellX, cellY, cellSize, cellSize);
+        }
+      }
+    }
+    
+    function drawMaze() {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let cellX = x * cellSize;
+          let cellY = y * cellSize;
+          let d = dist(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, cellX + cellSize / 2, cellY + cellSize / 2);
+          if (d > radarRange) continue;
+          stroke(regions[y][x].wallColor);
+          strokeWeight(2);
+          if (maze[y][x].walls[0]) line(cellX, cellY, cellX + cellSize, cellY);
+          if (maze[y][x].walls[1]) line(cellX + cellSize, cellY, cellX + cellSize, cellY + cellSize);
+          if (maze[y][x].walls[2]) line(cellX, cellY + cellSize, cellX + cellSize, cellY + cellSize);
+          if (maze[y][x].walls[3]) line(cellX, cellY, cellX, cellY + cellSize);
+        }
+      }
+    }
+    
+    function drawPlayer() {
+      fill(0, 255, 0);
+      noStroke();
+      ellipse(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, cellSize / 2);
+    }
+    
+    function drawGoal() {
+      let d = dist(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, (cols - 2) * cellSize + cellSize / 2, (rows - 2) * cellSize + cellSize / 2);
+      if (d > radarRange) return;
+      fill(255, 0, 0);
+      noStroke();
+      rect((cols - 2) * cellSize + 10, (rows - 2) * cellSize + 10, cellSize - 20, cellSize - 20);
+    }
+    
+    function drawRadar() {
+      push();
+      translate(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2);
+      rotate(radarAngle);
+      fill(0, 255, 0, 50);
+      noStroke();
+      arc(0, 0, radarRange * 2, radarRange * 2, 0, PI / 4);
+      pop();
+    }
+    
+    function drawHUD() {
+      fill(255);
+      textSize(16);
+      textAlign(LEFT);
+      text(`Score: ${player.score}  HP: ${player.hp}`, 10, 20);
+    }
+    
+    function movePlayer(keyCode) {
+      let newX = player.x;
+      let newY = player.y;
+      if (keyCode === UP_ARROW && !maze[player.y][player.x].walls[0]) newY--;
+      if (keyCode === RIGHT_ARROW && !maze[player.y][player.x].walls[1]) newX++;
+      if (keyCode === DOWN_ARROW && !maze[player.y][player.x].walls[2]) newY++;
+      if (keyCode === LEFT_ARROW && !maze[player.y][player.x].walls[3]) newX--;
+      if (newX >= 0 && newX < cols && newY >= 0 && newY < rows) {
+        player.x = newX;
+        player.y = newY;
+        triggerEvent(newX, newY);
+      }
+      if (player.x === cols - 2 && player.y === rows - 2) {
+        alert(`Congratulations! You reached the end! Final Score: ${player.score}, HP: ${player.hp}`);
+        player.x = 1;
+        player.y = 1;
+        player.score = 0;
+        player.hp = 100;
+        maze = generateMaze(cols, rows);
+        regions = generateRegions();
+      }
+    }
+    
+    function keyPressed() {
+      movePlayer(keyCode);
+    }
+    
+    function touchMoved() {
+      return false;
+    }
+  </script>
+</body>
+</html>

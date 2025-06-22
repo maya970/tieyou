@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>rpg v0.0.3</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+    }
+    canvas {
+      border: 2px solid #0f0;
+      width: 90vw;
+      height: 90vw; /* Square canvas */
+      max-width: 600px;
+      max-height: 600px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      width: 90%;
+      max-width: 300px;
+      justify-items: center;
+      align-items: center;
+    }
+    .control-btn {
+      width: 50px;
+      height: 50px;
+      background: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #up { grid-column: 2; grid-row: 1; }
+    #left { grid-column: 1; grid-row: 2; }
+    #right { grid-column: 3; grid-row: 2; }
+    #down { grid-column: 2; grid-row: 3; }
+    @media (max-width: 400px) {
+      .control-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+      }
+      #controls {
+        gap: 8px;
+        bottom: 10px;
+      }
+      canvas {
+        width: 85vw;
+        height: 85vw;
+      }
+    }
+    @media (min-width: 601px) {
+      .control-btn {
+        width: 60px;
+        height: 60px;
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div class="control-btn" id="up">up</div>
+    <div class="control-btn" id="left">left</div>
+    <div class="control-btn" id="right">right</div>
+    <div class="control-btn" id="down">down</div>
+  </div>
+  <script>
+    let maze;
+    let player;
+    let cellSize = 40;
+    let cols, rows;
+    let radarAngle = 0;
+    let radarRange = 100;
+    
+    function setup() {
+      // Create canvas based on window size
+      let size = min(windowWidth * 0.9, windowHeight * 0.9, 600);
+      createCanvas(size, size);
+      cols = floor(width / cellSize);
+      rows = floor(height / cellSize);
+      maze = generateMaze(cols, rows);
+      player = { x: 1, y: 1 }; // Start position
+      
+      // Add touch event listeners for buttons
+      document.getElementById('up').addEventListener('touchstart', () => movePlayer(UP_ARROW));
+      document.getElementById('down').addEventListener('touchstart', () => movePlayer(DOWN_ARROW));
+      document.getElementById('left').addEventListener('touchstart', () => movePlayer(LEFT_ARROW));
+      document.getElementById('right').addEventListener('touchstart', () => movePlayer(RIGHT_ARROW));
+    }
+    
+    function windowResized() {
+      let size = min(windowWidth * 0.9, windowHeight * 0.9, 600);
+      resizeCanvas(size, size);
+      cols = floor(width / cellSize);
+      rows = floor(height / cellSize);
+      maze = generateMaze(cols, rows);
+      player = { x: 1, y: 1 }; // Reset player position
+    }
+    
+    function draw() {
+      background(0);
+      drawMaze();
+      drawRadar();
+      drawPlayer();
+      radarAngle += 0.05; // Rotate radar
+    }
+    
+    function generateMaze(cols, rows) {
+      let grid = [];
+      // Initialize grid
+      for (let y = 0; y < rows; y++) {
+        grid[y] = [];
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = { walls: [true, true, true, true], visited: false }; // Top, Right, Bottom, Left
+        }
+      }
+      // Recursive backtracking
+      function carve(x, y) {
+        grid[y][x].visited = true;
+        let directions = shuffle([[0, -1], [1, 0], [0, 1], [-1, 0]]); // Up, Right, Down, Left
+        for (let [dx, dy] of directions) {
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !grid[ny][nx].visited) {
+            if (dx === 1) { // Right
+              grid[y][x].walls[1] = false;
+              grid[ny][nx].walls[3] = false;
+            } else if (dx === -1) { // Left
+              grid[y][x].walls[3] = false;
+              grid[ny][nx].walls[1] = false;
+            } else if (dy === 1) { // Down
+              grid[y][x].walls[2] = false;
+              grid[ny][nx].walls[0] = false;
+            } else if (dy === -1) { // Up
+              grid[y][x].walls[0] = false;
+              grid[ny][nx].walls[2] = false;
+            }
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(0, 0);
+      // Set end point
+      grid[rows - 2][cols - 2].walls = [false, false, false, false]; // Open end
+      return grid;
+    }
+    
+    function drawMaze() {
+      stroke(0, 255, 0);
+      strokeWeight(2);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let cellX = x * cellSize;
+          let cellY = y * cellSize;
+          // Only draw walls within radar range
+          let d = dist(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, cellX + cellSize / 2, cellY + cellSize / 2);
+          if (d > radarRange) continue;
+          if (maze[y][x].walls[0]) line(cellX, cellY, cellX + cellSize, cellY); // Top
+          if (maze[y][x].walls[1]) line(cellX + cellSize, cellY, cellX + cellSize, cellY + cellSize); // Right
+          if (maze[y][x].walls[2]) line(cellX, cellY + cellSize, cellX + cellSize, cellY + cellSize); // Bottom
+          if (maze[y][x].walls[3]) line(cellX, cellY, cellX, y * cellSize + cellSize); // Left
+        }
+      }
+      // Draw end point
+      fill(255, 0, 0);
+      noStroke();
+      rect((cols - 2) * cellSize + 10, (rows - 2) * cellSize + 10, cellSize - 20, cellSize - 20);
+    }
+    
+    function drawRadar() {
+      push();
+      translate(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2);
+      rotate(radarAngle);
+      fill(0, 255, 0, 50);
+      noStroke();
+      arc(0, 0, radarRange * 2, radarRange * 2, 0, PI / 4);
+      pop();
+    }
+    
+    function drawPlayer() {
+      fill(0, 255, 0);
+      noStroke();
+      ellipse(player.x * cellSize + cellSize / 2, player.y * cellSize + cellSize / 2, cellSize / 2);
+    }
+    
+    function movePlayer(keyCode) {
+      let newX = player.x;
+      let newY = player.y;
+      if (keyCode === UP_ARROW && !maze[player.y][player.x].walls[0]) newY--;
+      if (keyCode === RIGHT_ARROW && !maze[player.y][player.x].walls[1]) newX++;
+      if (keyCode === DOWN_ARROW && !maze[player.y][player.x].walls[2]) newY++;
+      if (keyCode === LEFT_ARROW && !maze[player.y][player.x].walls[3]) newX--;
+      if (newX >= 0 && newX < cols && newY >= 0 && newY < rows) {
+        player.x = newX;
+        player.y = newY;
+      }
+      // Check if player reached the end
+      if (player.x === cols - 2 && player.y === rows - 2) {
+        alert("Congratulations! You reached the end!");
+        player.x = 1;
+        player.y = 1;
+        maze = generateMaze(cols, rows);
+      }
+    }
+    
+    function keyPressed() {
+      movePlayer(keyCode); // Keep keyboard controls for desktop
+    }
+    
+    // Prevent default touch behavior on canvas
+    function touchMoved() {
+      return false;
+    }
+  </script>
+</body>
+</html>

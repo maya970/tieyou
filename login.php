@@ -4,6 +4,13 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 session_start();
+
+// Check if user is already logged in
+if (isset($_SESSION['user_id'])) {
+    header('Location: lobby.php');
+    exit;
+}
+
 require_once 'db.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

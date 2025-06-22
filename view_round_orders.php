@@ -24,7 +24,7 @@ foreach ($orders as $order) {
     echo implode('|', [
         $order['id'],
         htmlspecialchars($order['content']),
-        htmlspecialchars($order['username'] ?: '未知'),
+        htmlspecialchars($order['username'] ?: 'δ֪'),
         $order['type'],
         htmlspecialchars($order['admin_reply'] ?? '')
     ]) . "\n";

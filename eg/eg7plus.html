@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>RPG v0.0.10 - First Person with Fixed Monster Attack</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      width: 100vw;
+      height: calc(100vh - 100px);
+      max-width: 800px;
+      max-height: 800px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      display: grid;
+      grid-template-areas: 
+        ". up ."
+        "left attack right";
+      gap: 15px;
+      width: 90%;
+      max-width: 300px;
+      justify-items: center;
+      align-items: center;
+      z-index: 10;
+    }
+    .control-btn {
+      width: 60px;
+      height: 60px;
+      background: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #up { grid-area: up; }
+    #left { grid-area: left; }
+    #right { grid-area: right; }
+    #attack { grid-area: attack; }
+    #hud {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-size: 16px;
+      font-family: Arial, sans-serif;
+      z-index: 10;
+    }
+    #notification {
+      position: fixed;
+      top: 40px;
+      left: 10px;
+      color: #ff0;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+      z-index: 10;
+      transition: opacity 2s;
+    }
+    #dialogue-box {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 20px;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      z-index: 20;
+      display: none;
+      max-width: 80%;
+      text-align: center;
+      font-family: Arial, sans-serif;
+    }
+    #dialogue-image {
+      width: 100px;
+      height: 100px;
+      background: #555;
+      margin: 0 auto 10px;
+    }
+    #dialogue-text {
+      margin-bottom: 10px;
+    }
+    .dialogue-btn {
+      background: #0f0;
+      color: #000;
+      border: none;
+      padding: 10px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    .flash {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 0, 0, 0.5);
+      z-index: 15;
+      opacity: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 400px) {
+      .control-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+      }
+      #controls {
+        gap: 10px;
+        bottom: 5px;
+      }
+      canvas {
+        height: calc(100vh - 80px);
+      }
+    }
+    @media (min-width: 601px) {
+      .control-btn {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">Score: 0  HP: 100  Weapon: None</div>
+  <div id="notification"></div>
+  <div id="dialogue-box">
+    <div id="dialogue-image"></div>
+    <div id="dialogue-text"></div>
+    <button class="dialogue-btn" id="choice1"></button>
+    <button class="dialogue-btn" id="choice2"></button>
+  </div>
+  <div id="flash" class="flash"></div>
+  <div id="controls">
+    <div class="control-btn" id="up">↑</div>
+    <div class="control-btn" id="left">←</div>
+    <div class="control-btn" id="attack">⚔</div>
+    <div class="control-btn" id="right">→</div>
+  </div>
+  <script>
+    let scene, camera, renderer, radarLight;
+    let leftHand, rightHand;
+    let maze, regions, player, cols, rows, cellSize;
+    let monsters = [];
+    let treasures = [];
+    let traps = [];
+    let events = [];
+    let radarAngle = 0;
+    let radarRange = 3;
+    let animationState = { isAnimating: false, type: null, startTime: 0, duration: 300 };
+    let handAnimation = { offset: 0, speed: 0.05 };
+    let weapons = [
+      { name: 'None', damage: 10, color: 0xcccccc },
+      { name: 'Sword', damage: 20, color: 0xaaaaaa },
+      { name: 'Axe', damage: 30, color: 0x888888 }
+    ];
+    let isDialogueActive = false;
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(90, window.innerWidth / (window.innerHeight - 100), 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      let size = Math.min(window.innerWidth, window.innerHeight - 100, 800);
+      renderer.setSize(size, size);
+      document.body.appendChild(renderer.domElement);
+
+      cellSize = 1;
+      cols = 12;
+      rows = 12;
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100, direction: 0, weapon: weapons[0] };
+
+      createMazeGeometry();
+      createMonsters();
+      createTreasures();
+      createTraps();
+      createEvents();
+      createHands();
+
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 0.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+
+      updateCamera();
+
+      document.getElementById('up').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(38); });
+      document.getElementById('left').addEventListener('touchstart', (e) => { e.preventDefault(); rotatePlayer('left'); });
+      document.getElementById('right').addEventListener('touchstart', (e) => { e.preventDefault(); rotatePlayer('right'); });
+      document.getElementById('attack').addEventListener('touchstart', (e) => { e.preventDefault(); attackMonster(); });
+      document.addEventListener('keydown', (e) => {
+        if (isDialogueActive) return;
+        if (e.keyCode === 38) movePlayer(38);
+        if (e.keyCode === 37) rotatePlayer('left');
+        if (e.keyCode === 39) rotatePlayer('right');
+        if (e.keyCode === 32) attackMonster();
+      });
+
+      window.addEventListener('resize', onWindowResize);
+
+      animate();
+    }
+
+    function generateMaze(cols, rows) {
+      let grid = [];
+      for (let y = 0; y < rows; y++) {
+        grid[y] = [];
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = { walls: [true, true, true, true], visited: false };
+        }
+      }
+      function carve(x, y) {
+        grid[y][x].visited = true;
+        let directions = shuffle([[0, -1], [1, 0], [0, 1], [-1, 0]]);
+        for (let [dx, dy] of directions) {
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !grid[ny][nx].visited) {
+            if (dx === 1) {
+              grid[y][x].walls[1] = false;
+              grid[ny][nx].walls[3] = false;
+            } else if (dx === -1) {
+              grid[y][x].walls[3] = false;
+              grid[ny][nx].walls[1] = false;
+            } else if (dy === 1) {
+              grid[y][x].walls[2] = false;
+              grid[ny][nx].walls[0] = false;
+            } else if (dy === -1) {
+              grid[y][x].walls[0] = false;
+              grid[ny][nx].walls[2] = false;
+            }
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(0, 0);
+      grid[rows - 2][cols - 2].walls = [false, false, false, false];
+      return grid;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function generateRegions() {
+      let regions = [];
+      const types = [
+        { type: 'Normal', wallColor: 0x00ff00, floorColor: 0x003300 },
+        { type: 'Danger', wallColor: 0xff0000, floorColor: 0x330000 },
+        { type: 'Treasure', wallColor: 0xffff00, floorColor: 0x333300 },
+        { type: 'Safe', wallColor: 0x0000ff, floorColor: 0x000033 }
+      ];
+      for (let y = 0; y < rows; y++) {
+        regions[y] = [];
+        for (let x = 0; x < cols; x++) {
+          regions[y][x] = types[Math.floor(Math.random() * 4)];
+        }
+      }
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x < cols - 3) {
+            while (
+              regions[y][x].type === regions[y][x + 1].type &&
+              regions[y][x].type === regions[y][x + 2].type &&
+              regions[y][x].type === regions[y][x + 3].type
+            ) {
+              regions[y][x + 3] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+          if (y < rows - 3) {
+            while (
+              regions[y][x].type === regions[y + 1][x].type &&
+              regions[y][x].type === regions[y + 2][x].type &&
+              regions[y][x].type === regions[y + 3][x].type
+            ) {
+              regions[y + 3][x] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+        }
+      }
+      regions[1][1] = types[0];
+      regions[rows - 2][cols - 2] = types[3];
+      return regions;
+    }
+
+    function createMazeGeometry() {
+      const wallHeight = 1;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let floorGeo = new THREE.PlaneGeometry(cellSize, cellSize);
+          let floorMat = new THREE.MeshLambertMaterial({ color: regions[y][x].floorColor });
+          let floor = new THREE.Mesh(floorGeo, floorMat);
+          floor.rotation.x = -Math.PI / 2;
+          floor.position.set(x * cellSize, 0, y * cellSize);
+          scene.add(floor);
+
+          let wallGeo = new THREE.BoxGeometry(cellSize, wallHeight, 0.1);
+          let wallMat = new THREE.MeshLambertMaterial({ color: regions[y][x].wallColor });
+          if (maze[y][x].walls[0]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize - cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[1]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize + cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[2]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize + cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[3]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize - cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+        }
+      }
+      let goalGeo = new THREE.BoxGeometry(cellSize * 0.5, 0.2, cellSize * 0.5);
+      let goalMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+      let goal = new THREE.Mesh(goalGeo, goalMat);
+      goal.position.set((cols - 2) * cellSize, 0.1, (rows - 2) * cellSize);
+      scene.add(goal);
+    }
+
+    function createMonsters() {
+      const monsterCount = 5;
+      for (let i = 0; i < monsterCount; i++) {
+        let x, y;
+        do {
+          x = Math.floor(Math.random() * cols);
+          y = Math.floor(Math.random() * rows);
+        } while ((x === 1 && y === 1) || (x === cols - 2 && y === rows - 2));
+        let monsterGeo = new THREE.BoxGeometry(cellSize * 0.5, 0.5, cellSize * 0.5);
+        let monsterMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+        let monsterMesh = new THREE.Mesh(monsterGeo, monsterMat);
+        monsterMesh.position.set(x * cellSize, 0.25, y * cellSize);
+        scene.add(monsterMesh);
+        monsters.push({ x, y, hp: 50, mesh: monsterMesh });
+      }
+    }
+
+    function createTreasures() {
+      const treasureCount = 3;
+      for (let i = 0; i < treasureCount; i++) {
+        let x, y;
+        do {
+          x = Math.floor(Math.random() * cols);
+          y = Math.floor(Math.random() * rows);
+        } while ((x === 1 && y === 1) || (x === cols - 2 && y === rows - 2) || monsters.some(m => m.x === x && m.y === y));
+        let treasureGeo = new THREE.BoxGeometry(cellSize * 0.3, 0.2, cellSize * 0.3);
+        let treasureMat = new THREE.MeshLambertMaterial({ color: 0xffff00 });
+        let treasureMesh = new THREE.Mesh(treasureGeo, treasureMat);
+        treasureMesh.position.set(x * cellSize, 0.1, y * cellSize);
+        scene.add(treasureMesh);
+        treasures.push({ x, y, mesh: treasureMesh });
+      }
+    }
+
+    function createTraps() {
+      const trapCount = 3;
+      for (let i = 0; i < trapCount; i++) {
+        let x, y;
+        do {
+          x = Math.floor(Math.random() * cols);
+          y = Math.floor(Math.random() * rows);
+        } while ((x === 1 && y === 1) || (x === cols - 2 && y === rows - 2) || monsters.some(m => m.x === x && m.y === y) || treasures.some(t => t.x === x && t.y === y));
+        traps.push({ x, y });
+      }
+    }
+
+    function createEvents() {
+      const eventCount = 2;
+      for (let i = 0; i < eventCount; i++) {
+        let x, y;
+        do {
+          x = Math.floor(Math.random() * cols);
+          y = Math.floor(Math.random() * rows);
+        } while ((x === 1 && y === 1) || (x === cols - 2 && y === rows - 2) || monsters.some(m => m.x === x && m.y === y) || treasures.some(t => t.x === x && t.y === y) || traps.some(t => t.x === x && t.y === y));
+        events.push({ x, y });
+      }
+    }
+
+    function createHands() {
+      const handGeo = new THREE.BoxGeometry(0.1, 0.05, 0.2);
+      let handMat = new THREE.MeshLambertMaterial({ color: player.weapon.color });
+      leftHand = new THREE.Mesh(handGeo, handMat);
+      rightHand = new THREE.Mesh(handGeo, handMat);
+      leftHand.position.set(-0.2, -0.2, -0.5);
+      rightHand.position.set(0.2, -0.2, -0.5);
+      camera.add(leftHand);
+      camera.add(rightHand);
+      scene.add(camera);
+    }
+
+    function updateHands() {
+      leftHand.material.color.setHex(player.weapon.color);
+      rightHand.material.color.setHex(player.weapon.color);
+      const bob = Math.sin(handAnimation.offset) * 0.02;
+      leftHand.position.y = -0.2 + bob;
+      rightHand.position.y = -0.2 + bob;
+      handAnimation.offset += handAnimation.speed;
+    }
+
+    function triggerTreasure(x, y) {
+      const treasureIndex = treasures.findIndex(t => t.x === x && t.y === y);
+      if (treasureIndex === -1) return;
+      const treasure = treasures[treasureIndex];
+      scene.remove(treasure.mesh);
+      treasures.splice(treasureIndex, 1);
+      const hpGain = Math.floor(Math.random() * 20) + 10;
+      const scoreGain = Math.floor(Math.random() * 20) + 10;
+      player.hp = Math.min(player.hp + hpGain, 100);
+      player.score += scoreGain;
+      const weaponRoll = Math.random();
+      let newWeapon = player.weapon;
+      if (weaponRoll < 0.3) newWeapon = weapons[1]; // Sword
+      else if (weaponRoll < 0.5) newWeapon = weapons[2]; // Axe
+      player.weapon = newWeapon;
+      showNotification(`Found Treasure! +${scoreGain} Score, +${hpGain} HP, Got ${newWeapon.name}`);
+      updateHUD();
+    }
+
+    function triggerTrap(x, y) {
+      const trapIndex = traps.findIndex(t => t.x === x && t.y === y);
+      if (trapIndex === -1) return;
+      traps.splice(trapIndex, 1);
+      const hpLoss = Math.floor(Math.random() * 20) + 10;
+      const scoreLoss = Math.floor(Math.random() * 10) + 5;
+      player.hp -= hpLoss;
+      player.score = Math.max(0, player.score - scoreLoss);
+      showNotification(`Hit Trap! -${hpLoss} HP, -${scoreLoss} Score`);
+      triggerFlash();
+      updateHUD();
+      if (player.hp <= 0) {
+        showNotification(`Game Over! HP reached 0. Final Score: ${player.score}`);
+        resetGame();
+      }
+    }
+
+    function triggerEvent(x, y) {
+      const eventIndex = events.findIndex(e => e.x === x && e.y === y);
+      if (eventIndex === -1) return;
+      events.splice(eventIndex, 1);
+      showDialogue();
+    }
+
+    function showDialogue() {
+      isDialogueActive = true;
+      const dialogueBox = document.getElementById('dialogue-box');
+      const dialogueText = document.getElementById('dialogue-text');
+      const choice1 = document.getElementById('choice1');
+      const choice2 = document.getElementById('choice2');
+      dialogueText.innerText = "A mysterious figure appears: 'Choose your fate!'";
+      choice1.innerText = "Accept the challenge";
+      choice2.innerText = "Refuse and flee";
+      dialogueBox.style.display = 'block';
+      choice1.onclick = () => {
+        const scoreChange = Math.random() > 0.5 ? 20 : -20;
+        player.score = Math.max(0, player.score + scoreChange);
+        showNotification(`Accepted challenge! Score ${scoreChange > 0 ? '+' : ''}${scoreChange}`);
+        updateHUD();
+        dialogueBox.style.display = 'none';
+        isDialogueActive = false;
+      };
+      choice2.onclick = () => {
+        const hpChange = Math.random() > 0.5 ? 10 : -10;
+        player.hp = Math.max(0, Math.min(100, player.hp + hpChange));
+        showNotification(`Fled from figure! HP ${hpChange > 0 ? '+' : ''}${hpChange}`);
+        updateHUD();
+        if (player.hp <= 0) {
+          showNotification(`Game Over! HP reached 0. Final Score: ${player.score}`);
+          resetGame();
+        }
+        dialogueBox.style.display = 'none';
+        isDialogueActive = false;
+      };
+    }
+
+    function showNotification(message) {
+      const notification = document.getElementById('notification');
+      notification.innerText = message;
+      notification.style.opacity = 1;
+      setTimeout(() => { notification.style.opacity = 0; }, 2000);
+    }
+
+    function triggerFlash() {
+      const flash = document.getElementById('flash');
+      flash.style.opacity = 0.5;
+      setTimeout(() => { flash.style.opacity = 0; }, 200);
+    }
+
+    function attackMonster() {
+      if (animationState.isAnimating || isDialogueActive) return;
+      const directions = [
+        { dx: 0, dy: -1 }, // North
+        { dx: 1, dy: 0 }, // East
+        { dx: 0, dy: 1 }, // South
+        { dx: -1, dy: 0 } // West
+      ];
+      const dir = directions[player.direction];
+      const targetX = player.x + dir.dx;
+      const targetY = player.y + dir.dy;
+      if (targetX < 0 || targetX >= cols || targetY < 0 || targetY >= rows) return;
+      const monsterIndex = monsters.findIndex(m => m.x === targetX && m.y === targetY && m.hp > 0);
+      if (monsterIndex === -1) {
+        showNotification(`No monster to attack!`);
+        return;
+      }
+      animationState = {
+        isAnimating: true,
+        type: 'attack',
+        startTime: performance.now(),
+        duration: 300
+      };
+      const monster = monsters[monsterIndex];
+      monster.hp -= player.weapon.damage;
+      showNotification(`Attacked Monster! Monster HP: ${monster.hp}`);
+      triggerFlash();
+      if (monster.hp <= 0) {
+        scene.remove(monster.mesh);
+        monsters.splice(monsterIndex, 1);
+        showNotification(`Monster defeated!`);
+      } else {
+        player.hp -= 20;
+        showNotification(`Monster attacks! -20 HP`);
+        triggerFlash();
+        if (player.hp <= 0) {
+          showNotification(`Game Over! HP reached 0. Final Score: ${player.score}`);
+          resetGame();
+        }
+      }
+      updateHUD();
+    }
+
+    function movePlayer(keyCode) {
+      if (animationState.isAnimating || isDialogueActive) return;
+      let newX = player.x;
+      let newY = player.y;
+      let wallIndex;
+      if (keyCode === 38) {
+        if (player.direction === 0) { // North
+          newY--;
+          wallIndex = 0;
+        } else if (player.direction === 1) { // East
+          newX++;
+          wallIndex = 1;
+        } else if (player.direction === 2) { // South
+          newY++;
+          wallIndex = 2;
+        } else if (player.direction === 3) { // West
+          newX--;
+          wallIndex = 3;
+        }
+        if (newX >= 0 && newX < cols && newY >= 0 && newY < rows && !maze[player.y][player.x].walls[wallIndex]) {
+          if (monsters.some(m => m.x === newX && m.y === newY && m.hp > 0)) {
+            showNotification(`Cannot move! Monster blocks the path.`);
+            return;
+          }
+          animationState = {
+            isAnimating: true,
+            type: 'move',
+            startTime: performance.now(),
+            duration: 300,
+            startPos: { x: player.x * cellSize, z: player.y * cellSize },
+            endPos: { x: newX * cellSize, z: newY * cellSize }
+          };
+          player.x = newX;
+          player.y = newY;
+          triggerTreasure(newX, newY);
+          triggerTrap(newX, newY);
+          triggerEvent(newX, newY);
+          if (player.x === cols - 2 && player.y === rows - 2) {
+            showNotification(`Congratulations! You reached the end! Final Score: ${player.score}, HP: ${player.hp}`);
+            resetGame();
+          }
+        }
+      }
+    }
+
+    function rotatePlayer(direction) {
+      if (animationState.isAnimating || isDialogueActive) return;
+      let newDirection = player.direction;
+      let deltaYaw;
+      if (direction === 'right') {
+        newDirection = (player.direction + 1) % 4;
+        deltaYaw = -Math.PI / 2;
+      } else if (direction === 'left') {
+        newDirection = (player.direction - 1 + 4) % 4;
+        deltaYaw = Math.PI / 2;
+      }
+      animationState = {
+        isAnimating: true,
+        type: 'rotate',
+        startTime: performance.now(),
+        duration: 300,
+        startYaw: getCurrentYaw(),
+        deltaYaw: deltaYaw
+      };
+      player.direction = newDirection;
+    }
+
+    function getCurrentYaw() {
+      if (player.direction === 0) return 0;
+      else if (player.direction === 1) return -Math.PI / 2;
+      else if (player.direction === 2) return Math.PI;
+      else return Math.PI / 2;
+    }
+
+    function resetGame() {
+      scene.clear();
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 0.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100, direction: 0, weapon: weapons[0] };
+      monsters = [];
+      treasures = [];
+      traps = [];
+      events = [];
+      createMazeGeometry();
+      createMonsters();
+      createTreasures();
+      createTraps();
+      createEvents();
+      createHands();
+      updateHUD();
+      updateCamera();
+      animationState.isAnimating = false;
+      isDialogueActive = false;
+      document.getElementById('dialogue-box').style.display = 'none';
+    }
+
+    function updateCamera() {
+      if (animationState.isAnimating) {
+        let elapsed = performance.now() - animationState.startTime;
+        let t = Math.min(elapsed / animationState.duration, 1);
+        if (animationState.type === 'move') {
+          let x = animationState.startPos.x + (animationState.endPos.x - animationState.startPos.x) * t;
+          let z = animationState.startPos.z + (animationState.endPos.z - animationState.startPos.z) * t;
+          camera.position.set(x, cellSize * 0.5, z);
+        } else if (animationState.type === 'rotate') {
+          let yaw = animationState.startYaw + animationState.deltaYaw * t;
+          camera.rotation.set(0, yaw, 0);
+        } else if (animationState.type === 'attack') {
+          // No camera movement during attack
+        }
+        if (t >= 1) {
+          animationState.isAnimating = false;
+          camera.position.set(player.x * cellSize, cellSize * 0.5, player.y * cellSize);
+          camera.rotation.set(0, getCurrentYaw(), 0);
+        }
+      } else {
+        camera.position.set(player.x * cellSize, cellSize * 0.5, player.y * cellSize);
+        camera.rotation.set(0, getCurrentYaw(), 0);
+      }
+      camera.rotation.order = 'YXZ';
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      radarLight.position.set(player.x * cellSize, 1, player.y * cellSize);
+      radarLight.target.position.set(
+        player.x * cellSize + Math.cos(radarAngle) * radarRange * cellSize,
+        0,
+        player.y * cellSize + Math.sin(radarAngle) * radarRange * cellSize
+      );
+      radarLight.target.updateMatrixWorld();
+      radarAngle += 0.05;
+      updateHands();
+      updateCamera();
+      renderer.render(scene, camera);
+    }
+
+    function updateHUD() {
+      document.getElementById('hud').innerText = `Score: ${player.score}  HP: ${player.hp}  Weapon: ${player.weapon.name}`;
+    }
+
+    function onWindowResize() {
+      let size = Math.min(window.innerWidth, window.innerHeight - 100, 800);
+      renderer.setSize(size, size);
+      camera.aspect = size / size;
+      camera.updateProjectionMatrix();
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'resources' => 500,
                     'growth_rate' => 2.5,
                     'economy' => 500,
-                    'economy_growth' => 0,
+                    
                     'military' => 100,
                     'military_growth' => 0,
                     'culture' => 100,
@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'resources' => 300,
                     'growth_rate' => 1.8,
                     'economy' => 300,
-                    'economy_growth' => 0,
+                  
                     'military' => 50,
                     'military_growth' => 0,
                     'culture' => 50,
@@ -96,10 +96,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare("
             INSERT INTO cities (
                 game_id, name, x, y, description, population, resources, growth_rate, updated_at,
-                city_display_type, city_display_value, economy, economy_growth, military, military_growth,
+                city_display_type, city_display_value, economy, military, military_growth,
                 culture, culture_growth, science, science_growth, infrastructure, infrastructure_growth,
                 health, health_growth, education, education_growth, stability, stability_growth, show_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         foreach ($cities as $city) {
             if (!empty($city['name']) && isset($city['x'], $city['y']) && is_numeric($city['x']) && is_numeric($city['y'])) {
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $city['city_display_type'] ?? 'circle',
                     $city['city_display_value'] ?? '',
                     $city['economy'] ?? 500,
-                    $city['economy_growth'] ?? 0,
+                  
                     $city['military'] ?? 100,
                     $city['military_growth'] ?? 0,
                     $city['culture'] ?? 100,
@@ -194,7 +194,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="number" v-model.number="city.resources" name="cities[][resources]" placeholder="资源" class="w-full p-2 mb-2 border rounded">
                     <input type="number" step="0.01" v-model.number="city.growth_rate" name="cities[][growth_rate]" placeholder="人口增长率 (%)" class="w-full p-2 mb-2 border rounded">
                     <input type="number" v-model.number="city.economy" name="cities[][economy]" placeholder="经济" class="w-full p-2 mb-2 border rounded">
-                    <input type="number" step="0.01" v-model.number="city.economy_growth" name="cities[][economy_growth]" placeholder="经济增长率 (%)" class="w-full p-2 mb-2 border rounded">
+               
                     <input type="number" v-model.number="city.military" name="cities[][military]" placeholder="军事" class="w-full p-2 mb-2 border rounded">
                     <input type="number" step="0.01" v-model.number="city.military_growth" name="cities[][military_growth]" placeholder="军事增长率 (%)" class="w-full p-2 mb-2 border rounded">
                     <input type="number" v-model.number="city.culture" name="cities[][culture]" placeholder="文化" class="w-full p-2 mb-2 border rounded">
@@ -241,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             resources: 500,
                             growth_rate: 0,
                             economy: 500,
-                            economy_growth: 0,
+                            
                             military: 100,
                             military_growth: 0,
                             culture: 100,

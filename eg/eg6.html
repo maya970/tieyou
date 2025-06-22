@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>RPG v0.1.7 - First-Person Maze with Turning Animation</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+      overflow: hidden;
+      touch-action: none;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      width: 100vw;
+      height: calc(100vh - 120px);
+      max-width: 800px;
+      max-height: 800px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      display: grid;
+      grid-template-areas: 
+        "attack up heal"
+        "left . right"
+        ". down inventory";
+      gap: 10px;
+      width: 90%;
+      max-width: 300px;
+      justify-items: center;
+      align-items: center;
+      z-index: 10;
+    }
+    .control-btn {
+      width: 60px;
+      height: 60px;
+      background: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #attack-btn, #heal-btn, #inventory-btn {
+      width: 60px;
+      height: 60px;
+      background: #ff0;
+      border: 2px solid #ff0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 18px;
+      text-align: center;
+    }
+    #up { grid-area: up; }
+    #left { grid-area: left; }
+    #right { grid-area: right; }
+    #down { grid-area: down; }
+    #attack-btn { grid-area: attack; }
+    #heal-btn { grid-area: heal; }
+    #inventory-btn { grid-area: inventory; }
+    #stats {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      color: #fff;
+      font-size: 16px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 5px;
+      text-align: center;
+      z-index: 10;
+    }
+    #message {
+      position: fixed;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 5px 10px;
+      border-radius: 5px;
+      z-index: 10;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+    #inventory {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 20;
+      display: none;
+      max-width: 90%;
+      font-size: 16px;
+    }
+    #inventory button {
+      background: #0f0;
+      border: 1px solid #0f0;
+      color: #000;
+      padding: 5px 10px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    #direction-arrow {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 30px;
+      height: 30px;
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      line-height: 30px;
+      z-index: 10;
+    }
+    @media (max-width: 400px) {
+      .control-btn, #attack-btn, #heal-btn, #inventory-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+      }
+      #attack-btn, #heal-btn, #inventory-btn {
+        font-size: 14px;
+      }
+      #controls {
+        gap: 8px;
+        bottom: 5px;
+      }
+      canvas {
+        height: calc(100vh - 100px);
+      }
+      #stats {
+        font-size: 12px;
+        padding: 3px;
+      }
+      #message {
+        font-size: 12px;
+        top: 30px;
+      }
+      #inventory {
+        font-size: 14px;
+        padding: 15px;
+      }
+      #direction-arrow {
+        width: 20px;
+        height: 20px;
+        font-size: 16px;
+        line-height: 20px;
+        top: 8px;
+      }
+    }
+    @media (min-width: 601px) {
+      .control-btn, #attack-btn, #heal-btn, #inventory-btn {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+      }
+      #attack-btn, #heal-btn, #inventory-btn {
+        font-size: 20px;
+      }
+      #stats {
+        font-size: 18px;
+      }
+      #direction-arrow {
+        width: 40px;
+        height: 40px;
+        font-size: 32px;
+        line-height: 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="stats">HP: 100 | Score: 0 | Strength: 10 | Defense: 5</div>
+  <div id="message"></div>
+  <div id="inventory">
+    <div id="equipment">Weapon: None<br>Armor: None</div>
+    <div id="items">Items: None</div>
+    <button id="use-item">Use Item</button>
+    <button id="close-inventory">Close</button>
+  </div>
+  <div id="direction-arrow">A</div>
+  <div id="controls">
+    <div class="control-btn" id="up">¡ü</div>
+    <div class="control-btn" id="left">¡û</div>
+    <div class="control-btn" id="right">¡ú</div>
+    <div class="control-btn" id="down">¡ý</div>
+    <div id="attack-btn">Attack</div>
+    <div id="heal-btn">Heal</div>
+    <div id="inventory-btn">Inv</div>
+  </div>
+  <script>
+    let scene, camera, renderer, radarLight, handMesh;
+    let maze, regions, player, cols, rows, cellSize, monsters, chests;
+    let radarAngle = 0;
+    let radarRange = 3;
+    let cameraYaw = -Math.PI / 2; // Start facing up
+    let baseYaw = -Math.PI / 2; // Movement-based direction
+    let cameraPitch = 0;
+    let attackAnimationTime = 0;
+    let messageTimeout = null;
+    let inventoryItems = [];
+    let isMoving = false;
+    let moveStartTime = 0;
+    let moveDuration = 0.3;
+    let startPosition = new THREE.Vector3();
+    let targetPosition = new THREE.Vector3();
+    let startYaw = -Math.PI / 2;
+    let targetYaw = -Math.PI / 2;
+    let isDragging = false;
+    let previousTouch = null;
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / (window.innerHeight - 120), 0.1, 100);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      let size = Math.min(window.innerWidth, window.innerHeight - 120, 800);
+      renderer.setSize(size, size);
+      document.body.appendChild(renderer.domElement);
+
+      cellSize = 1;
+      cols = 12;
+      rows = 12;
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100, strength: 10, defense: 5, weapon: null, armor: null };
+      monsters = generateMonsters();
+      chests = generateChests();
+
+      createMazeGeometry();
+      createMonsters();
+      createChests();
+      createHands();
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 1.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+
+      updateCamera();
+
+      document.getElementById('up').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(38); });
+      document.getElementById('left').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(37); });
+      document.getElementById('right').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(39); });
+      document.getElementById('down').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(40); });
+      document.getElementById('attack-btn').addEventListener('touchstart', (e) => { e.preventDefault(); attackMonster(); });
+      document.getElementById('heal-btn').addEventListener('touchstart', (e) => { e.preventDefault(); healPlayer(); });
+      document.getElementById('inventory-btn').addEventListener('touchstart', (e) => { e.preventDefault(); toggleInventory(); });
+      document.getElementById('attack-btn').addEventListener('click', attackMonster);
+      document.getElementById('heal-btn').addEventListener('click', healPlayer);
+      document.getElementById('inventory-btn').addEventListener('click', toggleInventory);
+      document.getElementById('use-item').addEventListener('click', useItem);
+      document.getElementById('close-inventory').addEventListener('click', toggleInventory);
+      document.addEventListener('keydown', (e) => movePlayer(e.keyCode));
+      document.addEventListener('mousedown', () => isDragging = true);
+      document.addEventListener('mouseup', () => isDragging = false);
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('touchstart', (e) => {
+        if (e.target.className.includes('control-btn') || e.target.id.includes('-btn') || e.target.tagName === 'BUTTON') return;
+        e.preventDefault();
+        if (e.touches.length === 1) {
+          isDragging = true;
+          previousTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+      });
+      document.addEventListener('touchmove', onTouchMove);
+      document.addEventListener('touchend', () => { isDragging = false; previousTouch = null; });
+
+      animate();
+    }
+
+    function generateMaze(cols, rows) {
+      let grid = [];
+      for (let y = 0; y < rows; y++) {
+        grid[y] = [];
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = { walls: [true, true, true, true], visited: false };
+        }
+      }
+      function carve(x, y) {
+        grid[y][x].visited = true;
+        let directions = shuffle([[0, -1], [1, 0], [0, 1], [-1, 0]]);
+        for (let [dx, dy] of directions) {
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !grid[ny][nx].visited) {
+            if (dx === 1) {
+              grid[y][x].walls[1] = false;
+              grid[ny][nx].walls[3] = false;
+            } else if (dx === -1) {
+              grid[y][x].walls[3] = false;
+              grid[ny][nx].walls[1] = false;
+            } else if (dy === 1) {
+              grid[y][x].walls[2] = false;
+              grid[ny][nx].walls[0] = false;
+            } else if (dy === -1) {
+              grid[y][x].walls[0] = false;
+              grid[ny][nx].walls[2] = false;
+            }
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(0, 0);
+      grid[rows - 2][cols - 2].walls = [false, false, false, false];
+      return grid;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function generateRegions() {
+      let regions = [];
+      const types = [
+        { type: 'Normal', wallColor: 0x00ff00, floorColor: 0x003300 },
+        { type: 'Danger', wallColor: 0xff0000, floorColor: 0x330000 },
+        { type: 'Treasure', wallColor: 0xffff00, floorColor: 0x333300 },
+        { type: 'Safe', wallColor: 0x0000ff, floorColor: 0x000033 }
+      ];
+      for (let y = 0; y < rows; y++) {
+        regions[y] = [];
+        for (let x = 0; x < cols; x++) {
+          regions[y][x] = types[Math.floor(Math.random() * 4)];
+        }
+      }
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x < cols - 3) {
+            while (
+              regions[y][x].type === regions[y][x + 1].type &&
+              regions[y][x].type === regions[y][x + 2].type &&
+              regions[y][x].type === regions[y][x + 3].type
+            ) {
+              regions[y][x + 3] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+          if (y < rows - 3) {
+            while (
+              regions[y][x].type === regions[y + 1][x].type &&
+              regions[y][x].type === regions[y + 2][x].type &&
+              regions[y][x].type === regions[y + 3][x].type
+            ) {
+              regions[y + 3][x] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+        }
+      }
+      regions[1][1] = types[0];
+      regions[rows - 2][cols - 2] = types[3];
+      return regions;
+    }
+
+    function generateMonsters() {
+      let monsters = [];
+      const monsterTypes = {
+        Normal: { hp: 50, attack: 5, color: 0x00ff00, name: 'Goblin' },
+        Danger: { hp: 100, attack: 15, color: 0xff0000, name: 'Orc' },
+        Treasure: { hp: 30, attack: 3, color: 0xffff00, name: 'Slime' },
+        Safe: { hp: 20, attack: 0, color: 0x0000ff, name: 'Sprite' }
+      };
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x === 1 && y === 1 || x === cols - 2 && y === rows - 2) continue;
+          if (Math.random() < 0.1) {
+            let type = regions[y][x].type;
+            monsters.push({ x, y, ...monsterTypes[type], mesh: null });
+          }
+        }
+      }
+      return monsters;
+    }
+
+    function generateChests() {
+      let chests = [];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x === 1 && y === 1 || x === cols - 2 && y === rows - 2) continue;
+          if (regions[y][x].type === 'Treasure' && Math.random() < 0.2) {
+            chests.push({ x, y, opened: false, mesh: null });
+          }
+        }
+      }
+      return chests;
+    }
+
+    function createMazeGeometry() {
+      const wallHeight = 1;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let floorGeo = new THREE.PlaneGeometry(cellSize, cellSize);
+          let floorMat = new THREE.MeshLambertMaterial({ color: regions[y][x].floorColor });
+          let floor = new THREE.Mesh(floorGeo, floorMat);
+          floor.rotation.x = -Math.PI / 2;
+          floor.position.set(x * cellSize, 0, y * cellSize);
+          scene.add(floor);
+
+          let wallGeo = new THREE.BoxGeometry(cellSize, wallHeight, 0.1);
+          let wallMat = new THREE.MeshLambertMaterial({ color: regions[y][x].wallColor });
+          if (maze[y][x].walls[0]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize - cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[1]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize + cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[2]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize + cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[3]) {
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize - cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+        }
+      }
+      let goalGeo = new THREE.BoxGeometry(cellSize * 0.5, 0.2, cellSize * 0.5);
+      let goalMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+      let goal = new THREE.Mesh(goalGeo, goalMat);
+      goal.position.set((cols - 2) * cellSize, 0.1, (rows - 2) * cellSize);
+      scene.add(goal);
+    }
+
+    function createMonsters() {
+      monsters.forEach(monster => {
+        let geo = new THREE.SphereGeometry(cellSize * 0.3, 16, 16);
+        let mat = new THREE.MeshLambertMaterial({ color: monster.color });
+        monster.mesh = new THREE.Mesh(geo, mat);
+        monster.mesh.position.set(monster.x * cellSize, cellSize * 0.3, monster.y * cellSize);
+        scene.add(monster.mesh);
+      });
+    }
+
+    function createChests() {
+      chests.forEach(chest => {
+        let geo = new THREE.BoxGeometry(cellSize * 0.4, 0.4, cellSize * 0.4);
+        let mat = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+        chest.mesh = new THREE.Mesh(geo, mat);
+        chest.mesh.position.set(chest.x * cellSize, 0.2, chest.y * cellSize);
+        scene.add(chest.mesh);
+      });
+    }
+
+    function createHands() {
+      let geo = new THREE.BoxGeometry(0.1, 0.1, 0.3);
+      let mat = new THREE.MeshLambertMaterial({ color: player.weapon ? 0xcccccc : 0xdeb887 });
+      handMesh = new THREE.Mesh(geo, mat);
+      handMesh.position.set(0.2, -0.2, -0.3);
+      camera.add(handMesh);
+    }
+
+    function triggerEvent(x, y) {
+      let monster = monsters.find(m => m.x === x && m.y === y && m.hp > 0);
+      if (monster) {
+        showMessage(`Monster (${monster.name}) ahead! Attack to fight.`);
+        return;
+      }
+      let regionType = regions[y][x].type;
+      let rand = Math.random() * 100;
+      let eventProbs = {
+        'Normal': { treasure: 20, trap: 10, nothing: 70 },
+        'Danger': { treasure: 10, trap: 40, nothing: 50 },
+        'Treasure': { treasure: 50, trap: 10, nothing: 40 },
+        'Safe': { treasure: 30, trap: 0, nothing: 70 }
+      };
+      let probs = eventProbs[regionType];
+      if (rand < probs.treasure) {
+        player.score += 10;
+        player.hp = Math.min(player.hp + 10, 100);
+        showMessage(`Found Treasure in ${regionType}! +10 Score, +10 HP`);
+      } else if (rand < probs.treasure + probs.trap) {
+        player.hp -= 40;
+        showMessage(`Hit a Trap in ${regionType}! -40 HP`);
+        if (player.hp <= 0) {
+          showMessage(`Game Over! HP reached 0. Final Score: ${player.score}`);
+          resetGame();
+        }
+      } else {
+        showMessage(`Nothing happened in ${regionType}`);
+      }
+      updateUI();
+    }
+
+    function attackMonster() {
+      let yaw = normalizeAngle(-cameraYaw);
+      let targetX = player.x;
+      let targetY = player.y;
+      if (yaw >= -Math.PI / 4 && yaw < Math.PI / 4) { targetX++; } // Facing right
+      else if (yaw >= Math.PI / 4 && yaw < 3 * Math.PI / 4) { targetY++; } // Facing down
+      else if (yaw >= -3 * Math.PI / 4 && yaw < -Math.PI / 4) { targetY--; } // Facing up
+      else { targetX--; } // Facing left
+
+      if (targetX < 0 || targetX >= cols || targetY < 0 || targetY >= rows) {
+        showMessage('No monster in range!');
+        return;
+      }
+
+      let monster = monsters.find(m => m.x === targetX && m.y === targetY && m.hp > 0);
+      if (monster) {
+        attackAnimationTime = 0.5;
+        let damage = Math.max(0, player.strength - monster.attack / 2);
+        monster.hp -= damage;
+        showMessage(`Attacked ${monster.name}! Dealt ${damage} damage. Monster HP: ${monster.hp}`);
+        if (monster.hp <= 0) {
+          scene.remove(monster.mesh);
+          showMessage(`${monster.name} defeated! +20 Score`);
+          player.score += 20;
+          monsters = monsters.filter(m => m.hp > 0);
+        } else {
+          let playerDamage = Math.max(0, monster.attack - player.defense);
+          player.hp -= playerDamage;
+          showMessage(`${monster.name} hits back! -${playerDamage} HP`);
+          if (player.hp <= 0) {
+            showMessage(`Game Over! HP reached 0. Final Score: ${player.score}`);
+            resetGame();
+          }
+        }
+      } else {
+        showMessage('No monster in range!');
+      }
+      updateUI();
+    }
+
+    function healPlayer() {
+      if (player.score >= 10) {
+        player.score -= 10;
+        player.hp = Math.min(player.hp + 20, 100);
+        showMessage('Healed! +20 HP, -10 Score');
+      } else {
+        showMessage('Not enough score to heal!');
+      }
+      updateUI();
+    }
+
+    function openChest(x, y) {
+      let chest = chests.find(c => c.x === x && c.y === y && !c.opened);
+      if (chest) {
+        chest.opened = true;
+        scene.remove(chest.mesh);
+        let items = [
+          { type: 'weapon', name: 'Sword', strength: 5 },
+          { type: 'armor', name: 'Shield', defense: 5 },
+          { type: 'potion', name: 'Potion', hp: 20 }
+        ];
+        let item = items[Math.floor(Math.random() * items.length)];
+        if (item.type === 'weapon') {
+          player.weapon = item.name;
+          player.strength += item.strength;
+          showMessage(`Found ${item.name}! +${item.strength} Strength`);
+          scene.remove(handMesh);
+          createHands();
+        } else if (item.type === 'armor') {
+          player.armor = item.name;
+          player.defense += item.defense;
+          showMessage(`Found ${item.name}! +${item.defense} Defense`);
+        } else {
+          inventoryItems.push(item);
+          showMessage(`Found ${item.name}! Added to inventory`);
+        }
+        updateInventory();
+        updateUI();
+      }
+    }
+
+    function useItem() {
+      if (inventoryItems.length > 0) {
+        let item = inventoryItems.shift();
+        if (item.hp) {
+          player.hp = Math.min(player.hp + item.hp, 100);
+          showMessage(`Used ${item.name}! +${item.hp} HP`);
+        }
+        updateInventory();
+        updateUI();
+      } else {
+        showMessage('No items to use!');
+      }
+    }
+
+    function toggleInventory() {
+      let inventory = document.getElementById('inventory');
+      inventory.style.display = inventory.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function updateInventory() {
+      document.getElementById('equipment').innerHTML = `Weapon: ${player.weapon || 'None'}<br>Armor: ${player.armor || 'None'}`;
+      document.getElementById('items').innerHTML = `Items: ${inventoryItems.length > 0 ? inventoryItems.map(i => i.name).join(', ') : 'None'}`;
+    }
+
+    function showMessage(text) {
+      let messageDiv = document.getElementById('message');
+      messageDiv.innerText = text;
+      messageDiv.style.opacity = 1;
+      if (messageTimeout) clearTimeout(messageTimeout);
+      messageTimeout = setTimeout(() => {
+        messageDiv.style.opacity = 0;
+      }, 3000);
+    }
+
+    function normalizeAngle(angle) {
+      while (angle > Math.PI) angle -= 2 * Math.PI;
+      while (angle < -Math.PI) angle += 2 * Math.PI;
+      return angle;
+    }
+
+    function clampYaw(yaw) {
+      let delta = normalizeAngle(yaw - baseYaw);
+      if (delta > Math.PI / 4) delta = Math.PI / 4;
+      if (delta < -Math.PI / 4) delta = -Math.PI / 4;
+      return normalizeAngle(baseYaw + delta);
+    }
+
+    function movePlayer(keyCode) {
+      if (isMoving) return;
+      let newX = player.x;
+      let newY = player.y;
+      let dx = 0, dy = 0;
+      targetYaw = baseYaw;
+
+      if (keyCode === 38) { // Up (forward)
+        dx = Math.round(Math.cos(baseYaw));
+        dy = Math.round(Math.sin(baseYaw));
+      } else if (keyCode === 37) { // Left
+        dx = Math.round(Math.cos(baseYaw + Math.PI / 2));
+        dy = Math.round(Math.sin(baseYaw + Math.PI / 2));
+        targetYaw = baseYaw + Math.PI / 2;
+      } else if (keyCode === 39) { // Right
+        dx = Math.round(Math.cos(baseYaw - Math.PI / 2));
+        dy = Math.round(Math.sin(baseYaw - Math.PI / 2));
+        targetYaw = baseYaw - Math.PI / 2;
+      } else if (keyCode === 40) { // Down (backward)
+        dx = -Math.round(Math.cos(baseYaw));
+        dy = -Math.round(Math.sin(baseYaw));
+      } else {
+        return;
+      }
+
+      newX += dx;
+      newY += dy;
+
+      if (newX < 0 || newX >= cols || newY < 0 || newY >= rows) {
+        showMessage('Cannot move outside maze boundaries!');
+        return;
+      }
+
+      let wallIndex;
+      if (dx === 0 && dy === -1) wallIndex = 0; // Up
+      else if (dx === 1 && dy === 0) wallIndex = 1; // Right
+      else if (dx === 0 && dy === 1) wallIndex = 2; // Down
+      else if (dx === -1 && dy === 0) wallIndex = 3; // Left
+      else {
+        showMessage('Invalid movement direction!');
+        return;
+      }
+
+      if (maze[player.y][player.x].walls[wallIndex]) {
+        showMessage('Cannot move through walls!');
+        return;
+      }
+
+      let monster = monsters.find(m => m.x === newX && m.y === newY && m.hp > 0);
+      if (monster) {
+        showMessage(`Monster (${monster.name}) blocks the path! Attack to defeat it first.`);
+        return;
+      }
+
+      isMoving = true;
+      moveStartTime = performance.now() / 1000;
+      startPosition.set(player.x * cellSize, 0.7, player.y * cellSize);
+      targetPosition.set(newX * cellSize, 0.7, newY * cellSize);
+      startYaw = baseYaw;
+      player.x = newX;
+      player.y = newY;
+      setTimeout(() => {
+        isMoving = false;
+        triggerEvent(newX, newY);
+        openChest(newX, newY);
+        if (player.x === cols - 2 && player.y === rows - 2) {
+          showMessage(`Congratulations! You reached the end! Final Score: ${player.score}, HP: ${player.hp}`);
+          resetGame();
+        }
+        updateUI();
+      }, moveDuration * 1000);
+    }
+
+    function onMouseMove(event) {
+      if (isDragging) {
+        let deltaYaw = -event.movementX * 0.005;
+        cameraYaw = clampYaw(cameraYaw + deltaYaw);
+        cameraPitch = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, cameraPitch - event.movementY * 0.005));
+        updateCamera();
+      }
+    }
+
+    function onTouchMove(event) {
+      if (isDragging && event.touches.length === 1 && !event.target.className.includes('control-btn') && !event.target.id.includes('-btn') && event.target.tagName !== 'BUTTON') {
+        event.preventDefault();
+        let touch = event.touches[0];
+        let deltaX = touch.clientX - previousTouch.x;
+        let deltaY = touch.clientY - previousTouch.y;
+        let deltaYaw = -deltaX * 0.005;
+        cameraYaw = clampYaw(cameraYaw + deltaYaw);
+        cameraPitch = Math.max(-Math.PI / 6, Math.min(Math.PI / 6, cameraPitch - deltaY * 0.005));
+        previousTouch = { x: touch.clientX, y: touch.clientY };
+        updateCamera();
+      }
+    }
+
+    function resetGame() {
+      scene.clear();
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 1.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100, strength: 10, defense: 5, weapon: null, armor: null };
+      monsters = generateMonsters();
+      chests = generateChests();
+      inventoryItems = [];
+      createMazeGeometry();
+      createMonsters();
+      createChests();
+      createHands();
+      baseYaw = -Math.PI / 2;
+      cameraYaw = -Math.PI / 2;
+      startYaw = -Math.PI / 2;
+      targetYaw = -Math.PI / 2;
+      cameraPitch = 0;
+      isMoving = false;
+      attackAnimationTime = 0;
+      updateUI();
+      updateInventory();
+      showMessage('New game started!');
+      updateCamera();
+    }
+
+    function updateCamera() {
+      if (!isMoving) {
+        camera.position.set(player.x * cellSize, 0.7, player.y * cellSize);
+        baseYaw = targetYaw;
+        cameraYaw = clampYaw(cameraYaw);
+      } else {
+        let currentTime = performance.now() / 1000;
+        let t = Math.min((currentTime - moveStartTime) / moveDuration, 1);
+        camera.position.lerpVectors(startPosition, targetPosition, t);
+        let deltaYaw = normalizeAngle(targetYaw - startYaw);
+        if (deltaYaw > Math.PI) deltaYaw -= 2 * Math.PI;
+        if (deltaYaw < -Math.PI) deltaYaw += 2 * Math.PI;
+        baseYaw = normalizeAngle(startYaw + deltaYaw * t);
+        cameraYaw = clampYaw(cameraYaw);
+      }
+      camera.position.x = Math.max(0, Math.min(cols * cellSize, camera.position.x));
+      camera.position.z = Math.max(0, Math.min(rows * cellSize, camera.position.z));
+      camera.position.y = 0.7;
+      camera.rotation.set(0, 0, 0);
+      camera.rotateY(-cameraYaw);
+      camera.rotateX(-cameraPitch);
+    }
+
+    function updateUI() {
+      document.getElementById('stats').innerHTML = `HP: ${player.hp} | Score: ${player.score} | Strength: ${player.strength} | Defense: ${player.defense}`;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (attackAnimationTime > 0) {
+        let t = Math.min(1 - attackAnimationTime / 0.5, 1);
+        handMesh.rotation.x = -Math.PI / 4 * Math.sin(t * Math.PI);
+        attackAnimationTime = Math.max(0, attackAnimationTime - 0.016);
+        if (attackAnimationTime <= 0) handMesh.rotation.x = 0;
+      }
+      radarLight.position.set(camera.position.x, 1, camera.position.z);
+      radarLight.target.position.set(
+        camera.position.x + Math.cos(radarAngle) * radarRange * cellSize,
+        0,
+        camera.position.z + Math.sin(radarAngle) * radarRange * cellSize
+      );
+      radarLight.target.updateMatrixWorld();
+      radarAngle = normalizeAngle(radarAngle + 0.05);
+      if (isNaN(camera.position.x) || isNaN(camera.position.z) || isNaN(cameraYaw)) {
+        console.warn('Invalid state detected, resetting');
+        camera.position.set(player.x * cellSize, 0.7, player.y * cellSize);
+        cameraYaw = baseYaw;
+        cameraPitch = 0;
+      }
+      const arrow = document.getElementById('direction-arrow');
+      arrow.style.transform = `translateX(-50%) rotate(${baseYaw * 180 / Math.PI}deg)`;
+      updateCamera();
+      renderer.render(scene, camera);
+    }
+
+    init();
+  </script>
+</body>
+</html>

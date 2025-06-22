@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>RPG v0.0.5</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #000;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      width: 100vw;
+      height: calc(100vh - 100px);
+      max-width: 800px;
+      max-height: 800px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      display: grid;
+      grid-template-areas: 
+        ". up ."
+        "left . right"
+        ". down .";
+      gap: 15px;
+      width: 90%;
+      max-width: 300px;
+      justify-items: center;
+      align-items: center;
+      z-index: 10;
+    }
+    .control-btn {
+      width: 60px;
+      height: 60px;
+      background: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 8px;
+      color: #000;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #up { grid-area: up; }
+    #left { grid-area: left; }
+    #right { grid-area: right; }
+    #down { grid-area: down; }
+    #hud {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-size: 16px;
+      font-family: Arial, sans-serif;
+      z-index: 10;
+    }
+    @media (max-width: 400px) {
+      .control-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+      }
+      #controls {
+        gap: 10px;
+        bottom: 5px;
+      }
+      canvas {
+        height: calc(100vh - 80px);
+      }
+    }
+    @media (min-width: 601px) {
+      .control-btn {
+        width: 70px;
+        height: 70px;
+        font-size: 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">Score: 0  HP: 100</div>
+  <div id="controls">
+    <div class="control-btn" id="up">up</div>
+    <div class="control-btn" id="left">left</div>
+    <div class="control-btn" id="right">right</div>
+    <div class="control-btn" id="down">down</div>
+  </div>
+  <script>
+    let scene, camera, renderer, playerMesh, radarLight;
+    let maze, regions, player, cols, rows, cellSize;
+    let radarAngle = 0;
+    let radarRange = 3; // In cell units
+    let cameraYaw = 0; // Rotation around Y-axis
+    let cameraPitch = -0.3; // Slight downward tilt
+    let cameraDistance = 2; // Distance from player
+    let isDragging = false;
+    let previousTouch = null;
+
+    function init() {
+      // Scene setup
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / (window.innerHeight - 100), 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      let size = Math.min(window.innerWidth, window.innerHeight - 100, 800);
+      renderer.setSize(size, size);
+      document.body.appendChild(renderer.domElement);
+
+      // Maze and player setup
+      cellSize = 1;
+      cols = 12;
+      rows = 12;
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100 };
+
+      // Create maze geometry
+      createMazeGeometry();
+      createPlayer();
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 0.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+
+      // Camera position
+      updateCamera();
+
+      // Event listeners
+      document.getElementById('up').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(38); });
+      document.getElementById('left').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(37); });
+      document.getElementById('right').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(39); });
+      document.getElementById('down').addEventListener('touchstart', (e) => { e.preventDefault(); movePlayer(40); });
+      document.addEventListener('keydown', (e) => movePlayer(e.keyCode));
+      window.addEventListener('resize', onWindowResize);
+
+      // Mouse rotation
+      document.addEventListener('mousedown', () => isDragging = true);
+      document.addEventListener('mouseup', () => isDragging = false);
+      document.addEventListener('mousemove', onMouseMove);
+      // Touch rotation
+      document.addEventListener('touchstart', (e) => {
+        if (e.target.className.includes('control-btn')) return;
+        e.preventDefault();
+        if (e.touches.length === 1) {
+          isDragging = true;
+          previousTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+      });
+      document.addEventListener('touchmove', onTouchMove);
+      document.addEventListener('touchend', () => {
+        isDragging = false;
+        previousTouch = null;
+      });
+      // Zoom
+      document.addEventListener('wheel', onMouseWheel);
+      document.addEventListener('touchstart', onTouchStart);
+      document.addEventListener('touchmove', onTouchPinch);
+
+      animate();
+    }
+
+    function generateMaze(cols, rows) {
+      let grid = [];
+      for (let y = 0; y < rows; y++) {
+        grid[y] = [];
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = { walls: [true, true, true, true], visited: false };
+        }
+      }
+      function carve(x, y) {
+        grid[y][x].visited = true;
+        let directions = shuffle([[0, -1], [1, 0], [0, 1], [-1, 0]]);
+        for (let [dx, dy] of directions) {
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !grid[ny][nx].visited) {
+            if (dx === 1) {
+              grid[y][x].walls[1] = false;
+              grid[ny][nx].walls[3] = false;
+            } else if (dx === -1) {
+              grid[y][x].walls[3] = false;
+              grid[ny][nx].walls[1] = false;
+            } else if (dy === 1) {
+              grid[y][x].walls[2] = false;
+              grid[ny][nx].walls[0] = false;
+            } else if (dy === -1) {
+              grid[y][x].walls[0] = false;
+              grid[ny][nx].walls[2] = false;
+            }
+            carve(nx, ny);
+          }
+        }
+      }
+      carve(0, 0);
+      grid[rows - 2][cols - 2].walls = [false, false, false, false];
+      return grid;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function generateRegions() {
+      let regions = [];
+      const types = [
+        { type: 'Normal', wallColor: 0x00ff00, floorColor: 0x003300 },
+        { type: 'Danger', wallColor: 0xff0000, floorColor: 0x330000 },
+        { type: 'Treasure', wallColor: 0xffff00, floorColor: 0x333300 },
+        { type: 'Safe', wallColor: 0x0000ff, floorColor: 0x000033 }
+      ];
+      for (let y = 0; y < rows; y++) {
+        regions[y] = [];
+        for (let x = 0; x < cols; x++) {
+          regions[y][x] = types[Math.floor(Math.random() * 4)];
+        }
+      }
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (x < cols - 3) {
+            while (
+              regions[y][x].type === regions[y][x + 1].type &&
+              regions[y][x].type === regions[y][x + 2].type &&
+              regions[y][x].type === regions[y][x + 3].type
+            ) {
+              regions[y][x + 3] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+          if (y < rows - 3) {
+            while (
+              regions[y][x].type === regions[y + 1][x].type &&
+              regions[y][x].type === regions[y + 2][x].type &&
+              regions[y][x].type === regions[y + 3][x].type
+            ) {
+              regions[y + 3][x] = types.filter(t => t.type !== regions[y][x].type)[Math.floor(Math.random() * 3)];
+            }
+          }
+        }
+      }
+      regions[1][1] = types[0];
+      regions[rows - 2][cols - 2] = types[3];
+      return regions;
+    }
+
+    function createMazeGeometry() {
+      const wallHeight = 1; // Flat maze
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let floorGeo = new THREE.PlaneGeometry(cellSize, cellSize);
+          let floorMat = new THREE.MeshLambertMaterial({ color: regions[y][x].floorColor });
+          let floor = new THREE.Mesh(floorGeo, floorMat);
+          floor.rotation.x = -Math.PI / 2;
+          floor.position.set(x * cellSize, 0, y * cellSize);
+          scene.add(floor);
+
+          let wallGeo = new THREE.BoxGeometry(cellSize, wallHeight, 0.1);
+          let wallMat = new THREE.MeshLambertMaterial({ color: regions[y][x].wallColor });
+          if (maze[y][x].walls[0]) { // Top
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize - cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[1]) { // Right
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize + cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[2]) { // Bottom
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x * cellSize, wallHeight / 2, y * cellSize + cellSize / 2);
+            scene.add(wall);
+          }
+          if (maze[y][x].walls[3]) { // Left
+            let wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.rotation.y = Math.PI / 2;
+            wall.position.set(x * cellSize - cellSize / 2, wallHeight / 2, y * cellSize);
+            scene.add(wall);
+          }
+        }
+      }
+      let goalGeo = new THREE.BoxGeometry(cellSize * 0.5, 0.2, cellSize * 0.5);
+      let goalMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+      let goal = new THREE.Mesh(goalGeo, goalMat);
+      goal.position.set((cols - 2) * cellSize, 0.1, (rows - 2) * cellSize);
+      scene.add(goal);
+    }
+
+    function createPlayer() {
+      let playerGeo = new THREE.SphereGeometry(cellSize * 0.25, 16, 16);
+      let playerMat = new THREE.MeshLambertMaterial({ color: 0x00ff00 });
+      playerMesh = new THREE.Mesh(playerGeo, playerMat);
+      playerMesh.position.set(player.x * cellSize, cellSize * 0.25, player.y * cellSize);
+      scene.add(playerMesh);
+    }
+
+    function triggerEvent(x, y) {
+      let regionType = regions[y][x].type;
+      let rand = Math.random() * 100;
+      let eventProbs = {
+        'Normal': { treasure: 20, trap: 10, nothing: 70 },
+        'Danger': { treasure: 10, trap: 40, nothing: 50 },
+        'Treasure': { treasure: 50, trap: 10, nothing: 40 },
+        'Safe': { treasure: 30, trap: 0, nothing: 70 }
+      };
+      let probs = eventProbs[regionType];
+      if (rand < probs.treasure) {
+        player.score += 10;
+        player.hp = Math.min(player.hp + 10, 100);
+        alert(`Found Treasure in ${regionType} region! +10 Score, +10 HP. Score: ${player.score}, HP: ${player.hp}`);
+      } else if (rand < probs.treasure + probs.trap) {
+        player.hp -= 40;
+        alert(`Hit a Trap in ${regionType} region! -40 HP. Score: ${player.score}, HP: ${player.hp}`);
+        if (player.hp <= 0) {
+          alert(`Game Over! HP reached 0. Final Score: ${player.score}`);
+          resetGame();
+        }
+      } else {
+        alert(`Nothing happened in ${regionType} region. Score: ${player.score}, HP: ${player.hp}`);
+      }
+      updateHUD();
+    }
+
+    function movePlayer(keyCode) {
+      let newX = player.x;
+      let newY = player.y;
+      if (keyCode === 38 && !maze[player.y][player.x].walls[0]) newY--;
+      if (keyCode === 39 && !maze[player.y][player.x].walls[1]) newX++;
+      if (keyCode === 40 && !maze[player.y][player.x].walls[2]) newY++;
+      if (keyCode === 37 && !maze[player.y][player.x].walls[3]) newX--;
+      if (newX >= 0 && newX < cols && newY >= 0 && newY < rows) {
+        player.x = newX;
+        player.y = newY;
+        playerMesh.position.set(player.x * cellSize, cellSize * 0.25, player.y * cellSize);
+        triggerEvent(newX, newY);
+      }
+      if (player.x === cols - 2 && player.y === rows - 2) {
+        alert(`Congratulations! You reached the end! Final Score: ${player.score}, HP: ${player.hp}`);
+        resetGame();
+      }
+      updateCamera();
+    }
+
+    function resetGame() {
+      scene.clear();
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+      scene.add(ambientLight);
+      radarLight = new THREE.SpotLight(0x00ff00, 0.5, radarRange * cellSize * 2, Math.PI / 4);
+      scene.add(radarLight);
+      maze = generateMaze(cols, rows);
+      regions = generateRegions();
+      player = { x: 1, y: 1, score: 0, hp: 100 };
+      createMazeGeometry();
+      createPlayer();
+      updateHUD();
+      updateCamera();
+    }
+
+    function updateCamera() {
+      let playerPos = new THREE.Vector3(player.x * cellSize, cellSize * 0.25, player.y * cellSize);
+      let offset = new THREE.Vector3(
+        Math.sin(cameraYaw) * Math.cos(cameraPitch) * cameraDistance,
+        Math.sin(cameraPitch) * cameraDistance,
+        Math.cos(cameraYaw) * Math.cos(cameraPitch) * cameraDistance
+      );
+      camera.position.copy(playerPos).add(offset);
+      camera.lookAt(playerPos);
+    }
+
+    function onMouseMove(event) {
+      if (isDragging) {
+        cameraYaw -= event.movementX * 0.005;
+        cameraPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraPitch - event.movementY * 0.005));
+        updateCamera();
+      }
+    }
+
+    function onTouchMove(event) {
+      if (isDragging && event.touches.length === 1 && !event.target.className.includes('control-btn')) {
+        event.preventDefault();
+        let touch = event.touches[0];
+        let deltaX = touch.clientX - previousTouch.x;
+        let deltaY = touch.clientY - previousTouch.y;
+        cameraYaw -= deltaX * 0.005;
+        cameraPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraPitch - deltaY * 0.005));
+        previousTouch = { x: touch.clientX, y: touch.clientY };
+        updateCamera();
+      }
+    }
+
+    function onMouseWheel(event) {
+      cameraDistance = Math.max(1, Math.min(5, cameraDistance + event.deltaY * 0.01));
+      updateCamera();
+    }
+
+    let initialPinchDistance = null;
+    function onTouchStart(event) {
+      if (event.touches.length === 2) {
+        event.preventDefault();
+        let dx = event.touches[0].clientX - event.touches[1].clientX;
+        let dy = event.touches[0].clientY - event.touches[1].clientY;
+        initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
+      }
+    }
+
+    function onTouchPinch(event) {
+      if (event.touches.length === 2) {
+        event.preventDefault();
+        let dx = event.touches[0].clientX - event.touches[1].clientX;
+        let dy = event.touches[0].clientY - event.touches[1].clientY;
+        let currentDistance = Math.sqrt(dx * dx + dy * dy);
+        if (initialPinchDistance) {
+          let scale = currentDistance / initialPinchDistance;
+          cameraDistance = Math.max(1, Math.min(5, cameraDistance / scale));
+          initialPinchDistance = currentDistance;
+          updateCamera();
+        }
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      radarLight.position.set(player.x * cellSize, 1, player.y * cellSize);
+      radarLight.target.position.set(
+        player.x * cellSize + Math.cos(radarAngle) * radarRange * cellSize,
+        0,
+        player.y * cellSize + Math.sin(radarAngle) * radarRange * cellSize
+      );
+      radarLight.target.updateMatrixWorld();
+      radarAngle += 0.05;
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      let size = Math.min(window.innerWidth, window.innerHeight - 100, 800);
+      renderer.setSize(size, size);
+      camera.aspect = size / size;
+      camera.updateProjectionMatrix();
+    }
+
+    init();
+  </script>
+</body>
+</html>

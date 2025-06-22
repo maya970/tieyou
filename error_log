@@ -1,0 +1,22 @@
+[16-May-2025 21:46:54 PRC] 历史记录查询失败: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ''20' OFFSET '0'' at line 21 in /home/ftp/m/maya970/wwwroot/index.php on line 196
+[16-May-2025 21:47:16 PRC] 历史记录查询失败: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ''20' OFFSET '0'' at line 21 in /home/ftp/m/maya970/wwwroot/index.php on line 196
+[16-May-2025 21:54:09 PRC] 调试 index.php 开始: 2025-05-16 21:54:09
+[16-May-2025 21:54:09 PRC] 加载 check_auth.php
+[16-May-2025 21:54:09 PRC] Session 数据: {
+    "user_id": "1",
+    "role": "game_admin",
+    "username": "maya970"
+}
+[16-May-2025 21:54:09 PRC] 用户验证: user_id=1, role=game_admin
+[16-May-2025 22:01:42 PRC] index.php 执行开始: 2025-05-16 22:01:42
+[16-May-2025 22:01:42 PRC] 加载 check_auth.php
+[16-May-2025 22:01:42 PRC] Session 数据: {
+    "user_id": "1",
+    "role": "game_admin",
+    "username": "maya970"
+}
+[16-May-2025 22:01:42 PRC] 用户验证: user_id=1, role=game_admin
+[16-May-2025 22:01:42 PRC] PHP Warning:  Use of undefined constant JSON_QUOT - assumed 'JSON_QUOT' (this will throw an Error in a future version of PHP) in /home/ftp/m/maya970/wwwroot/index.php on line 397
+[16-May-2025 22:01:42 PRC] PHP Warning:  A non-numeric value encountered in /home/ftp/m/maya970/wwwroot/index.php on line 397
+[16-May-2025 22:01:42 PRC] PHP Warning:  Use of undefined constant JSON_QUOT - assumed 'JSON_QUOT' (this will throw an Error in a future version of PHP) in /home/ftp/m/maya970/wwwroot/index.php on line 405
+[16-May-2025 22:01:42 PRC] PHP Warning:  A non-numeric value encountered in /home/ftp/m/maya970/wwwroot/index.php on line 405
